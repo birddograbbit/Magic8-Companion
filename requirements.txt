@@ -1,23 +1,20 @@
-# Magic8‑Companion – Python requirements
+# Magic8-Companion – Python requirements
 
-# Pinned on 2025‑06‑07 (ship‑fast MVP)
+# Pinned on 2025-06-07 (ship-fast MVP)
 
-# Core orchestration + broker
+# Core orchestration / broker
 
 ib_async==1.0.3  # IBKR async client
 ibapi>=9.81.1.post1  # Official IB Python API fallback
 
 # Greeks & gamma
 
-py-vollib-vectorized==0.1.1  # Fast vector Greeks
+py_vollib_vectorized==0.1.1  # Fast vector Greeks
+spx-gamma-exposure @ git+https://github.com/jensolson/SPX-Gamma-Exposure.git@master  # Dealer gamma tools
 
-# SPX Gamma Exposure (install directly from GitHub)
+# Strategy & execution helpers
 
--e git+[https://github.com/jensolson/SPX-Gamma-Exposure.git@master#egg=spx-gamma-exposure](https://github.com/jensolson/SPX-Gamma-Exposure.git@master#egg=spx-gamma-exposure)
-
-# Strategy & execution helper
-
--e git+[https://github.com/aicheung/0dte-trader.git@master#egg=zero-dte-trader](https://github.com/aicheung/0dte-trader.git@master#egg=zero-dte-trader)
+zero-dte-trader @ git+https://github.com/aicheung/0dte-trader.git@master  # Order builder
 optopsy==2.0.1  # Back‑testing
 opstrat==0.1.7  # Pay‑off plots
 
@@ -43,6 +40,6 @@ streamlit>=1.35.0
 yfinance>=0.2.37
 holidays>=0.33
 
-# (Optional) GPU Greeks – enable when USE\_GPU=true
+# (Optional) GPU Greeks – enable when USE_GPU=true
 
 # optiongreeksgpu>=0.2.0
