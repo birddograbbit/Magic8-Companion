@@ -4,7 +4,7 @@
 
 # Core orchestration + broker
 
-ib\_async==1.0.3  # IBKR async client
+ib_async==1.0.3  # IBKR async client
 ibapi>=9.81.1.post1  # Official IB Python API fallback
 
 # Greeks & gamma
