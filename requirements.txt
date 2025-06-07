@@ -1,6 +1,6 @@
 # Magic8-Companion – Python Requirements
 # Focused dependencies for combo type selection + risk management
-# Updated: 2025-06-07
+# Updated: 2025-06-08
 
 # ==========================================
 # CORE DEPENDENCIES
@@ -29,9 +29,9 @@ py_vollib_vectorized==0.1.1        # Fast Greeks calculation for IV/volatility a
 numpy>=1.26.0                      # Numerical operations
 pandas>=2.1.0                      # Data manipulation
 
-# Simplified Gamma Exposure (For pinning analysis)
-# Note: Only using basic GEX functions, not full complex analysis
-spx-gamma-exposure @ git+https://github.com/jensolson/SPX-Gamma-Exposure.git@master
+# Dependencies for SPX-Gamma-Exposure functionality
+holidays>=0.34                     # Business day calculations for options expiry
+matplotlib>=3.7.0                  # Plotting for GEX analysis (optional)
 
 # ==========================================
 # ALERTS & INTEGRATION
@@ -73,10 +73,11 @@ rich>=13.7.0                       # Better terminal output
 # ❌ GPU libraries (OptionGreeksGPU - not needed for lightweight analysis)
 # ❌ Complex backtesting frameworks (optopsy)
 # ❌ Heavy TA libraries (pandas-ta)
+# ❌ spx-gamma-exposure as pip package (not properly packaged - see setup instructions)
 #
 # Magic8-Companion uses these libraries minimally:
 # ✅ py_vollib_vectorized: Only for basic IV/Greeks (not full option chain processing)
-# ✅ spx-gamma-exposure: Only for basic GEX analysis (not complex wall calculations)  
+# ✅ spx-gamma-exposure: Manual integration for basic GEX analysis (not complex wall calculations)  
 # ✅ ib_async: Only for position tracking and basic option data (not full chain processing)
 
 # ==========================================
@@ -87,3 +88,7 @@ rich>=13.7.0                       # Better terminal output
 # 2. Companion analyzes: IV environment, basic volatility, simple GEX
 # 3. Combines both: To score which combo TYPE is most favorable
 # 4. Much lighter than full Magic8Clone system
+#
+# SPX-Gamma-Exposure Integration:
+# The jensolson/SPX-Gamma-Exposure repository is not a proper Python package.
+# See setup instructions below for manual integration.
