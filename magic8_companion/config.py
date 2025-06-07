@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Magic8 Integration
     magic8_source: str = "file"  # file, http, websocket
-    magic8_file_path: str = "data/magic8_output.json"
+    magic8_file_path: str = "/data/magic8_output.json"
     magic8_url: str = ""
     magic8_poll_interval: int = 30
 

@@ -15,6 +15,9 @@ from pyVolLib import blackIV, blackDelta, blackGamma,\
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 
+import json # Added for GEX output
+from pathlib import Path # Added for GEX output
+
 def TRTH_GEX(raw):
     """
     Inputs:
@@ -265,6 +268,25 @@ def CBOE_GEX(filename, sens=True, plot=False, occ=False):
             ax.axvline(x=zeroGEX, color='xkcd:black', linestyle='--')
             ax.legend(labels=['SPX', 'Last', 'Zero GEX: '+str(zeroGEX)])
             plt.xticks(rotation=30)
+
+            # --- Begin GEX data saving ---
+            try:
+                # Path assumes GEX.py is in magic8_companion/external/spx_gex/
+                # and data directory is at the project root.
+                output_path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "gex_data.json"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                gex_output = {
+                    "zero_gamma_level": zeroGEX,
+                    "last_calculated_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                }
+                with open(output_path, 'w') as f:
+                    json.dump(gex_output, f, indent=4)
+                print(f"GEX data saved to {output_path}")
+            except Exception as e:
+                print(f"Error saving GEX data: {e}")
+            # --- End GEX data saving ---
+
             plt.show()
 
         else: return s
