@@ -1,249 +1,562 @@
-# Magic8‑Companion — Quick‑Ship Implementation Guide
+# Magic8‑Companion — Implementation Guide
 
-*Version 1.0 – June 7 2025*
-
----
-
-## 0  Purpose & Scope
-
-This guide shows **exactly** how to stand up the first‑pass **Magic8‑Companion**: an orchestration layer that consumes the proprietary 5‑minute Magic8 feed, computes 0‑DTE option‑combo favourability at four scheduled checkpoints (10 :30, 11 :00, 12 :30, 14 :45 ET) and pushes *entry* or *exit* signals to your broker & Discord.  The design obeys three principles:
-
-1. **Wrapper‑first** — We glue around proven open‑source repos; we never fork/core‑hack them unless unavoidable.
-2. **Core‑only** — We implement just two flows: **combo‑type selection** and **exit‑signal generation**.
-3. **Ship‑fast** — MVP is a mono‑service Docker target deliverable in ≤ 10 trading days; micro‑services are toggled later.
+*Version 1.1 – June 7 2025*
 
 ---
 
-## 1  High‑Level Architecture
+## 0  Purpose & Scope
+
+This guide provides **exactly** how to build the **Magic8‑Companion**: a focused orchestration system that consumes Magic8's 5‑minute predictions and provides two core functions:
+
+1. **Combo Type Recommendation** — At scheduled checkpoints (10:30, 11:00, 12:30, 14:45 ET), analyze Magic8's recommendations and determine which 0‑DTE option combo type is most favorable
+2. **Exit Signal Generation** — Monitor open positions and alert when market conditions turn adverse
+
+**Key Principles:**
+- **Wrapper‑first** — Orchestrate around Magic8 and IB API; build minimal custom logic
+- **Core‑only** — Focus solely on combo type selection and risk management  
+- **Ship‑fast** — Deploy as single service in ≤ 7 trading days
+
+**What Magic8‑Companion Does NOT Do:**
+- Calculate Greeks or gamma exposure (Magic8 provides this)
+- Form specific option combos (Magic8 provides strikes/prices)
+- Predict trends or ranges (Magic8 provides this)
+- Execute trades continuously (scheduled checkpoints only)
+
+---
+
+## 1  High‑Level Architecture
 
 ```mermaid
 flowchart TD
-  A[IB Gateway / Magic8 Feed] -->|option chain & predictions| B[Mono Service ‑ magic8_companion]
-  B --> C[(Redis Streams)]
-  B --> D[(TimescaleDB)]
-  B --> E[Discord Alerts]
-  B --> F[IB Order Manager]
+  A[Magic8 5-min Feed] -->|prediction data| B[Magic8‑Companion]
+  C[IB Portfolio API] -->|position data| B
+  B --> D[Combo Type Scorer]
+  B --> E[Position Monitor]
+  D -->|scheduled| F[Discord Alerts]
+  E -->|real-time| F
+  B --> G[(SQLite Position DB)]
 ```
 
-**Why mono‑service?** Less network hop, faster delivery; we promote to the micro‑service topology already drafted in *dev‑plan v2.1* once p95 latency > 20 s or throughput > 10 ticks/s. fileciteturn2file0
+**Data Flow:**
+1. **Consume** Magic8's 5‑minute predictions (trend, range, example trades)
+2. **Score** which combo type (Butterfly/Iron Condor/Vertical) is most favorable
+3. **Track** open positions via IB Portfolio API
+4. **Monitor** positions against exit triggers
+5. **Alert** via Discord when conditions change
 
 ---
 
-## 2  Component Stack (no forks, only wrappers)
+## 2  Magic8 Integration Specification
 
-| Layer               | OSS repo (unmodified)            | Wrapper module (new)         | Notes                                        |
-| ------------------- | -------------------------------- | ---------------------------- | -------------------------------------------- |
-| Broker & data       | **ib\_async**                    | `connectors/ib_connector.py` | Async context manager + reconnect            |
-| Greeks calculations | **py\_vollib\_vectorized** (CPU) | `services/greeks_engine`     | Vectorised Δ/Γ; GPU toggle later             |
-| Gamma exposure      | **SPX‑Gamma‑Exposure**           | `services/gex_calculator`    | Real‑time GEX flip & walls                   |
-| Strategy builder    | **0dte‑trader**                  | `services/combo_selector`    | We only call its contract helpers            |
-| Order execution     | — (via ib\_async)                | `services/order_manager`     | Encapsulates limit‑ladder & circuit breakers |
-| Persistence         | TimescaleDB                      | `utils/db_client.py`         | Async inserts & queries                      |
-| Cache / bus         | Redis Streams                    | `utils/redis_client.py`      | Option‑chain & metrics topics                |
-| Dashboards          | Streamlit + **opstrat**          | `services/dashboard`         | Pay‑off & live stats                         |
+### 2.1 Magic8 Data Format
+Based on the sample output, Magic8 provides:
 
----
-
-## 3  Algorithm Rules (frozen v2.1)
-
-```yaml
-quality_filters:
-  max_spread: 5.0           # $
-  min_open_interest: 100
-  min_volume: 1
-strategy_matrix:
-  iron_condor:
-    range_pct_lt: 0.006     # 0.6 %
-    short_delta: 0.10
-    long_delta: 0.05
-  butterfly:
-    gex_distance_pct_lt: 0.01
-    max_debit_pct: 0.002
-  vertical:
-    gex_distance_pct_gt: 0.004
-order_rules:
-  initial_edge_ticks: 2      # mid ±2
-  widen_every_s: 30          # seconds
-  max_attempts: 5
+```json
+{
+  "timestamp": "2025-05-22T11:41:19",
+  "spot_price": 5848.66,
+  "trend": "Up",
+  "predicted_close": 5849.52,
+  "strength": 0.53,
+  "range": 10.0,
+  "targets": [5850.0, 5860.0],
+  "levels": {
+    "calls": 5900.0,
+    "puts": 5850.0,
+    "center": 5875.0,
+    "delta": 5846.21,
+    "gamma": 5861.65,
+    "interest": 5831.99
+  },
+  "example_trades": {
+    "butterfly": {
+      "strikes": "5905/5855/5805",
+      "type": "CALL",
+      "price": 24.82,
+      "action": "BUY"
+    },
+    "iron_condor": {
+      "strikes": "5905/5910/5780/5775", 
+      "type": "CALL/PUT",
+      "price": 0.43,
+      "action": "SELL"
+    },
+    "vertical": {
+      "strikes": "5820/5815",
+      "type": "PUT", 
+      "price": 0.9,
+      "action": "SELL"
+    }
+  }
+}
 ```
 
-These exact constants come from the peer‑reviewed matrix in *magic8‑dev‑plan 2.1* fileciteturn2file0 and **must not be edited** until after post‑launch re‑calibration.
+### 2.2 Magic8 Integration Methods
+
+**Option A: File Polling** (Recommended for MVP)
+```python
+# Check for new Magic8 output file every 30 seconds
+magic8_file = "/path/to/magic8/output.json"
+```
+
+**Option B: HTTP API** (If available)
+```python
+# Poll Magic8 REST endpoint
+magic8_url = "https://magic8.api/latest"
+```
+
+**Option C: WebSocket Feed** (Future enhancement)
+```python
+# Real-time Magic8 predictions
+magic8_ws = "wss://magic8.feed/predictions"
+```
 
 ---
 
-## 4  Exit‑Signal Logic
+## 3  Component Stack (Minimal)
 
-An exit alert fires when **any** of the following triggers is true for an open combo:
-
-1. |Spot − Combo center| / Width ≥ 0.75
-2. Magic8’s new 5‑min prediction range no longer intersects current profit zone.
-3. *gamma\_exposure.total\_gamma* crosses zero away from the combo center.
-4. Daily loss > \$5 000 or position count > 10 (Circuit breakers) fileciteturn2file1.
-
-Alerts publish to Redis `exit_signals` stream and Discord; the Order Manager consumes and closes any live positions.
+| Layer               | Technology              | Purpose                           |
+| ------------------- | ----------------------- | --------------------------------- |
+| Magic8 Integration  | `requests` / file I/O   | Consume Magic8 predictions        |
+| Portfolio Data      | `ib_async`              | Track open positions              |
+| Combo Scoring       | Custom Python module    | Type favorability logic           |
+| Position Monitoring | Custom Python module    | Exit signal generation            |
+| Alerts              | `discord.py`            | Notifications                     |
+| Persistence         | SQLite                  | Position tracking DB              |
+| Scheduling          | `APScheduler`           | Checkpoint execution              |
 
 ---
 
-## 5  Scheduling
+## 4  Combo Type Scoring Logic
 
-In `main.py` we register four cron‑style async tasks:
+### 4.1 Scoring Matrix
+
+Based on Magic8's prediction data, score each combo type:
 
 ```python
-CHECKPOINTS = ["10:30", "11:00", "12:30", "14:45"]  # America/New_York
+def score_combo_types(magic8_data):
+    """Score Butterfly, Iron Condor, Vertical based on Magic8 data"""
+    
+    spot = magic8_data['spot_price']
+    trend_strength = magic8_data['strength']
+    range_size = magic8_data['range']
+    center = magic8_data['levels']['center']
+    
+    scores = {}
+    
+    # Butterfly: Favor when spot near center, low range
+    butterfly_score = 0
+    if abs(spot - center) / spot < 0.005:  # Within 0.5%
+        butterfly_score += 30
+    if range_size < 15:  # Tight range
+        butterfly_score += 25
+    if trend_strength < 0.6:  # Weak trend
+        butterfly_score += 20
+    
+    # Iron Condor: Favor when range-bound, neutral
+    condor_score = 0
+    if range_size < 20:  # Range-bound
+        condor_score += 35
+    if trend_strength < 0.7:  # Not strongly directional
+        condor_score += 30
+    if 0.4 <= trend_strength <= 0.6:  # Neutral zone
+        condor_score += 15
+    
+    # Vertical: Favor when strong trend, wide range
+    vertical_score = 0
+    if trend_strength > 0.6:  # Strong trend
+        vertical_score += 40
+    if range_size > 15:  # Expecting movement
+        vertical_score += 25
+    
+    scores = {
+        'butterfly': min(butterfly_score, 100),
+        'iron_condor': min(condor_score, 100), 
+        'vertical': min(vertical_score, 100)
+    }
+    
+    return scores
 ```
 
-Each task calls `orchestrator.run_cycle()` which:
+### 4.2 Recommendation Threshold
 
-1. Pulls latest option chain (ib\_async) → filters by *quality\_filters*.
-2. Recomputes Greeks & GEX snapshot.
-3. Scores each strategy via *strategy\_matrix*.
-4. Publishes top recommendation (score ≥ 70) to Discord.
-   If a position is already open, step 3 is skipped and *exit‑signal logic* runs instead.
+Only recommend if score ≥ 70 and clearly best option:
+
+```python
+def generate_recommendation(scores):
+    """Generate combo type recommendation"""
+    best_combo = max(scores, key=scores.get)
+    best_score = scores[best_combo]
+    
+    # Must score >= 70 and be 15+ points ahead
+    if best_score >= 70:
+        second_best = sorted(scores.values())[-2]
+        if best_score - second_best >= 15:
+            return {
+                'recommendation': best_combo,
+                'score': best_score,
+                'confidence': 'HIGH' if best_score >= 85 else 'MEDIUM'
+            }
+    
+    return {'recommendation': 'NONE', 'reason': 'No clear favorite'}
+```
 
 ---
 
-## 6  Project Layout
+## 5  Exit Signal Logic
 
-The mono‑service repo skeleton is pre‑generated (cookiecutter) and listed in dev‑plan v2.1 §1.1 fileciteturn2file9.  Key paths:
+Monitor positions and trigger exits when:
 
-```
-magic8clone/
-  main.py              # orchestrator entry‑point
-  modules/
-    data_collector/    # IB chain loader
-    greeks_engine/     # tiny wrapper around py_vollib_vectorized
-    gex_calculator/    # adapts SPX‑Gamma‑Exposure
-    combo_selector/    # strategy scoring
-    order_manager/     # execution & risk
-  utils/
-    redis_client.py
-    db_client.py       # Timescale async pool
-    monitoring.py      # Prometheus export
-scripts/
-  init_db.sql          # executed at container boot
+### 5.1 Exit Triggers
+
+```python
+def check_exit_signals(position, magic8_data):
+    """Check if position should be exited"""
+    
+    spot = magic8_data['spot_price']
+    predicted_range = magic8_data['targets']
+    
+    exit_signals = []
+    
+    # 1. Position drift beyond profit zone
+    if position['type'] == 'butterfly':
+        center_strike = position['center_strike']
+        wing_width = position['wing_width']
+        
+        distance_from_center = abs(spot - center_strike)
+        if distance_from_center > (wing_width * 0.75):
+            exit_signals.append({
+                'trigger': 'POSITION_DRIFT', 
+                'reason': f'Spot {spot} > 75% from center {center_strike}'
+            })
+    
+    elif position['type'] == 'iron_condor':
+        short_put = position['short_put_strike']
+        short_call = position['short_call_strike']
+        
+        if spot <= short_put * 1.02 or spot >= short_call * 0.98:
+            exit_signals.append({
+                'trigger': 'POSITION_DRIFT',
+                'reason': f'Spot {spot} approaching short strikes'
+            })
+    
+    # 2. Magic8 range no longer favorable
+    if position['type'] == 'butterfly':
+        if not (predicted_range[0] <= position['center_strike'] <= predicted_range[1]):
+            exit_signals.append({
+                'trigger': 'RANGE_SHIFT',
+                'reason': f"Predicted range {predicted_range} excludes center {position['center_strike']}"
+            })
+    
+    # 3. Trend reversal for directional trades
+    if position['type'] == 'vertical':
+        position_direction = position['direction']  # 'bull' or 'bear'
+        magic8_trend = magic8_data['trend'].lower()
+        
+        if (position_direction == 'bull' and magic8_trend == 'down') or \
+           (position_direction == 'bear' and magic8_trend == 'up'):
+            exit_signals.append({
+                'trigger': 'TREND_REVERSAL',
+                'reason': f"Position {position_direction} vs Magic8 {magic8_trend}"
+            })
+    
+    # 4. Circuit breakers
+    if position['unrealized_pnl'] <= -2000:  # $2k loss limit per position
+        exit_signals.append({
+            'trigger': 'LOSS_LIMIT',
+            'reason': f"Loss ${abs(position['unrealized_pnl'])} exceeds limit"
+        })
+    
+    return exit_signals
 ```
 
 ---
 
-## 7  Infrastructure as Code
+## 6  Scheduled Execution Framework
 
-### 7.1 Docker‑Compose (trimmed)
+### 6.1 Checkpoint Schedule
+
+```python
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime
+import pytz
+
+def setup_scheduler():
+    """Setup scheduled checkpoints"""
+    
+    scheduler = AsyncIOScheduler()
+    est = pytz.timezone('America/New_York')
+    
+    # Schedule checkpoint functions
+    scheduler.add_job(
+        run_checkpoint,
+        'cron',
+        hour=10, minute=30,
+        timezone=est,
+        id='checkpoint_1030'
+    )
+    
+    scheduler.add_job(
+        run_checkpoint,
+        'cron', 
+        hour=11, minute=0,
+        timezone=est,
+        id='checkpoint_1100'
+    )
+    
+    scheduler.add_job(
+        run_checkpoint,
+        'cron',
+        hour=12, minute=30, 
+        timezone=est,
+        id='checkpoint_1230'
+    )
+    
+    scheduler.add_job(
+        run_checkpoint,
+        'cron',
+        hour=14, minute=45,
+        timezone=est,
+        id='checkpoint_1445'
+    )
+    
+    return scheduler
+
+async def run_checkpoint():
+    """Execute scheduled checkpoint logic"""
+    
+    # 1. Get latest Magic8 prediction
+    magic8_data = await get_latest_magic8_data()
+    
+    # 2. Check current positions
+    positions = await get_current_positions()
+    
+    if positions:
+        # Monitor existing positions for exit signals
+        await check_position_exits(positions, magic8_data)
+    else:
+        # Generate new combo type recommendation  
+        await generate_combo_recommendation(magic8_data)
+```
+
+---
+
+## 7  Position Tracking
+
+### 7.1 Position Data Structure
+
+```python
+# positions.db (SQLite)
+CREATE TABLE positions (
+    id INTEGER PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    combo_type TEXT NOT NULL,  -- 'butterfly', 'iron_condor', 'vertical'
+    direction TEXT,            -- 'bull', 'bear', 'neutral'
+    entry_time TIMESTAMP,
+    center_strike REAL,
+    wing_width REAL,
+    short_put_strike REAL,
+    short_call_strike REAL,
+    entry_credit REAL,
+    max_loss REAL,
+    current_pnl REAL,
+    status TEXT DEFAULT 'OPEN'  -- 'OPEN', 'CLOSED', 'MONITORING'
+);
+```
+
+### 7.2 Position Sync
+
+```python
+async def sync_positions_with_ib():
+    """Sync position DB with IB portfolio"""
+    
+    ib_positions = await ib_client.get_positions()
+    db_positions = get_db_positions()
+    
+    for ib_pos in ib_positions:
+        if is_option_combo(ib_pos):
+            update_position_pnl(ib_pos)
+    
+    # Mark closed positions
+    for db_pos in db_positions:
+        if not position_exists_in_ib(db_pos):
+            mark_position_closed(db_pos)
+```
+
+---
+
+## 8  Project Layout (Simplified)
+
+```
+magic8_companion/
+├── main.py                 # Main orchestrator
+├── config.py              # Configuration management
+├── modules/
+│   ├── magic8_client.py    # Magic8 integration
+│   ├── combo_scorer.py     # Type scoring logic
+│   ├── position_monitor.py # Exit signal generation
+│   ├── ib_client.py        # IB portfolio integration
+│   └── alert_manager.py    # Discord notifications
+├── utils/
+│   ├── db_client.py        # SQLite operations
+│   └── scheduler.py        # Checkpoint scheduling
+├── data/
+│   └── positions.db        # SQLite database
+├── tests/
+│   └── test_*.py           # Unit tests
+├── docker-compose.yml
+├── requirements.txt
+└── .env.example
+```
+
+---
+
+## 9  Infrastructure (Minimal)
+
+### 9.1 Docker Compose
 
 ```yaml
+version: '3.8'
+
 services:
-  redis:
-    image: redis:7-alpine
-  timescaledb:
-    image: timescale/timescaledb:latest-pg15
-  magic8clone:
+  magic8_companion:
     build: .
     environment:
-      IB_HOST: host.docker.internal
-      IB_PORT: 7497
-      REDIS_URL: redis://redis:6379
-      DATABASE_URL: postgresql://quant:${DB_PASSWORD}@timescaledb/magic8clone
-      DRY_RUN: "true"
+      - MAGIC8_SOURCE=${MAGIC8_SOURCE:-file}
+      - MAGIC8_FILE_PATH=${MAGIC8_FILE_PATH:-/data/magic8_output.json}
+      - IB_HOST=${IB_HOST:-host.docker.internal}
+      - IB_PORT=${IB_PORT:-7497}
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
+      - TZ=America/New_York
+    volumes:
+      - ./data:/app/data
+      - ${MAGIC8_DATA_PATH}:/data
     depends_on:
-      - redis
-      - timescaledb
+      - health_check
+
+  health_check:
+    image: busybox
+    command: sleep 5
 ```
 
-Full file with health‑checks and monitoring targets lives in the scaffold (see dev‑plan v2.1 §1.2). fileciteturn2file8
+### 9.2 Configuration
 
-### 7.2 Database Schema
+```python
+# config.py
+from pydantic_settings import BaseSettings
 
-The `init_db.sql` script creates hypertables **option\_chain** and **gamma\_exposure** as per plan v2.1 §1.4 fileciteturn2file0.
+class Settings(BaseSettings):
+    # Magic8 Integration
+    magic8_source: str = "file"  # "file", "http", "websocket"
+    magic8_file_path: str = "/data/magic8_output.json"
+    magic8_url: str = ""
+    magic8_poll_interval: int = 30  # seconds
+    
+    # IB Connection
+    ib_host: str = "127.0.0.1"
+    ib_port: int = 7497
+    ib_client_id: int = 2
+    
+    # Alerts
+    discord_webhook: str = ""
+    
+    # Risk Limits
+    max_daily_loss: float = 5000
+    max_position_loss: float = 2000
+    
+    # Scoring Thresholds
+    min_recommendation_score: int = 70
+    min_score_gap: int = 15
+    
+    class Config:
+        env_file = ".env"
 
-```sql
-CREATE TABLE option_chain (
-  time TIMESTAMPTZ NOT NULL,
-  symbol VARCHAR(10) NOT NULL,
-  strike NUMERIC(10,2) NOT NULL,
-  expiry DATE NOT NULL,
-  option_type CHAR(1) NOT NULL,
-  bid NUMERIC(10,2),
-  ask NUMERIC(10,2),
-  open_interest INTEGER,
-  implied_vol NUMERIC(6,4),
-  delta NUMERIC(6,4),
-  gamma NUMERIC(8,6),
-  spot_price NUMERIC(10,2)
-);
-SELECT create_hypertable('option_chain', 'time', chunk_time_interval => INTERVAL '1 hour');
+settings = Settings()
 ```
 
 ---
 
-## 8  Risk & Monitoring
+## 10  Development Timeline (7 Days)
 
-* Circuit breakers: max\_daily\_loss, position\_size, concurrent\_orders, min\_account\_balance fileciteturn2file1
-* Prometheus metrics exported at `:8000/metrics`; scrape config ready in `infra/prometheus.yml`. fileciteturn2file11
-* Grafana dashboards auto‑provisioned; key KPI = `cycle_total_time_seconds` p95 < 30 s.
-
----
-
-## 9  CI / Testing Strategy
-
-* **Unit tests** on selector edge‑cases (pytest, fixtures inside `tests/`).
-* **Integration smoke**: docker‑compose service with fake IB Gateway replays canned chain, executed in GitHub Actions.
-* **Shadow‑live comparator** (Phase 2) logs credit/price divergence vs true Magic8 feed. fileciteturn2file10
+| Day | Deliverable | Details |
+|-----|-------------|---------|
+| 1 | Setup & Magic8 Integration | Docker setup, Magic8 file parsing |
+| 2 | Combo Type Scoring Logic | Implement scoring matrix |
+| 3 | Position Tracking | SQLite DB, IB integration |
+| 4 | Exit Signal Logic | Position monitoring, triggers |
+| 5 | Scheduled Execution | APScheduler, checkpoint logic |
+| 6 | Alerts & Testing | Discord integration, unit tests |
+| 7 | Integration Testing | End-to-end validation |
 
 ---
 
-## 10  Step‑by‑Step Timeline (T‑0 = first coding day)
+## 11  Quick Start
 
-| Day | Deliverable                                    | Owner    |
-| --- | ---------------------------------------------- | -------- |
-| 0   | Docker infra (redis, timescaledb, magic8clone) | DevOps   |
-| 1‑2 | IBConnector + schema ingest                    | Quant    |
-| 3‑4 | Greeks & GEX wrappers                          | Quant    |
-| 5‑6 | Combo Selector logic & tests                   | Algo Eng |
-| 7   | Order Manager (dry‑run only)                   | Algo Eng |
-| 8   | End‑to‑end smoke + latency hist                | All      |
-| 9   | Start continuous paper loop                    | —        |
-| 10+ | Split to micro‑services *iff* p95 > 20 s       | DevOps   |
+### 11.1 Prerequisites
 
-Timeline mirrors dev‑plan v1 but trims non‑MVP deliverables. fileciteturn2file10
+- Magic8 system running and outputting predictions
+- IB TWS or Gateway running (paper trading)
+- Docker & Docker Compose
 
----
-
-## 11  Deployment Cheatsheet
+### 11.2 Setup
 
 ```bash
-# Local dev
-$ docker compose up -d redis timescaledb
-$ poetry install && poetry run python -m magic8clone.main
+# Clone repository
+git clone https://github.com/birddograbbit/Magic8-Companion.git
+cd Magic8-Companion
 
-# Paper trading (mono‑service)
-$ DRY_RUN=false docker compose up -d magic8clone
+# Configure environment
+cp .env.example .env
+nano .env  # Set MAGIC8_FILE_PATH, DISCORD_WEBHOOK, etc.
 
-# View metrics
-$ open http://localhost:3000  # Grafana
-$ open http://localhost:9090  # Prometheus
+# Start system
+docker-compose up -d
+
+# Monitor logs
+docker-compose logs -f magic8_companion
+```
+
+### 11.3 Testing
+
+```bash
+# Simulate Magic8 data
+echo '{"spot_price": 5850, "trend": "Up", "strength": 0.75, "range": 12}' > data/magic8_output.json
+
+# Check recommendations in Discord channel
+# Verify position tracking in logs
 ```
 
 ---
 
-## 12  Future Enhancements (not in MVP)
+## 12  Example Discord Alerts
 
-* **GPU Greeks** via OptionGreeksGPU once latency trig fires.
-* **ML strike picker** (mmfill/iron‑condor) as A/B experiment.
-* **Multi‑broker** abstraction with pyetrade.
-* **Full micro‑service split** & autoscaling on ECS Fargate.
+**Combo Type Recommendation:**
+```
+🎯 Magic8-Companion Checkpoint 10:30 ET
+SPX: $5,848.66
+Recommendation: IRON CONDOR (Score: 78)
+Magic8 Range: 5850-5860, Strength: 0.53
+Rationale: Range-bound market, neutral trend strength
+```
+
+**Exit Signal:**
+```
+🚨 EXIT SIGNAL - Butterfly Position
+Center: 5875, Current: 5820
+Trigger: POSITION_DRIFT (spot >75% from center)
+Unrealized P&L: -$1,240
+Action Required: Close position immediately
+```
 
 ---
 
-### Appendix A  Environment Variable Reference
+## 13  Key Success Metrics
 
-| Variable       | Purpose                   | Example                                          |
-| -------------- | ------------------------- | ------------------------------------------------ |
-| `IB_HOST`      | TWS / IB Gateway hostname | `host.docker.internal`                           |
-| `IB_PORT`      | Port (paper = 7497)       | `7497`                                           |
-| `REDIS_URL`    | Redis connection URI      | `redis://redis:6379`                             |
-| `DATABASE_URL` | Timescale connection      | `postgresql://quant:pwd@timescaledb/magic8clone` |
-| `DRY_RUN`      | Skip real orders          | `true`                                           |
-| `USE_GPU`      | Enable GPU Greeks         | `false`                                          |
+- **Checkpoint Execution**: All 4 daily checkpoints execute successfully
+- **Alert Latency**: Recommendations delivered within 60 seconds  
+- **Position Tracking**: 100% sync with IB portfolio
+- **Exit Signal Accuracy**: No false positives for 5 consecutive sessions
 
 ---
 
-**You now have a single markdown guide with every mandatory detail to get Magic8‑Companion from zero to live‑paper trading while changing *zero* lines inside the audited open‑source projects.**
+**This implementation guide provides a focused, achievable path to deploy Magic8-Companion as a complementary system that enhances Magic8's capabilities with systematic combo type recommendations and disciplined risk management.**
