@@ -2,18 +2,24 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import datetime
-from ..modules.ib_client import IBClient # Assuming IBClient is needed for type hinting or direct calls
+import logging
+from ..modules.ib_client import IBClient
+from ..utils.position_parser import format_strikes_for_db
+
+# Module logger
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path('data/positions.db')
-DB_PATH.parent.mkdir(parents=True, exist_ok=True) # Ensure data directory exists
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def init_db():
-    # DB_PATH.parent.mkdir(parents=True, exist_ok=True) # Moved to top for module load
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -27,15 +33,6 @@ def init_db():
             strikes_info TEXT,         -- e.g., "C5000/C5010/C5020" or "P4900/P4905_C5100/C5105"
             quantity INTEGER NOT NULL,
             entry_price_total REAL,    -- Total credit received or debit paid for the combo (per unit)
-
-            # Fields from guide for more detailed tracking if needed:
-            # center_strike REAL,
-            # wing_width REAL,
-            # short_put_strike REAL,
-            # short_call_strike REAL,
-            # entry_credit REAL, # This could be entry_price_total if always credit
-            # max_loss REAL, # Calculated or from order
-
             current_pnl REAL DEFAULT 0.0,
             status TEXT DEFAULT 'OPEN'  -- 'OPEN', 'CLOSED', 'MONITORING'
         )"""
@@ -45,6 +42,7 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_status ON positions (status)")
     conn.commit()
     conn.close()
+
 
 def add_position_to_db(pos_details: Dict[str, Any]) -> Optional[int]:
     """
@@ -72,14 +70,96 @@ def add_position_to_db(pos_details: Dict[str, Any]) -> Optional[int]:
         )
         conn.commit()
         return cur.lastrowid
-    except sqlite3.IntegrityError as e: # Handles UNIQUE constraint violation for con_id
-        print(f"Error adding position (con_id {pos_details.get('con_id')} might already exist): {e}")
+    except sqlite3.IntegrityError as e:
+        logger.error(f"Error adding position (con_id {pos_details.get('con_id')} might already exist): {e}")
         return None
     except Exception as e:
-        print(f"Unexpected error adding position to DB: {e}")
+        logger.error(f"Unexpected error adding position to DB: {e}")
         return None
     finally:
         conn.close()
+
+
+def create_position_from_magic8_recommendation(
+    magic8_data: Dict,
+    combo_type: str,
+    con_id: Optional[int] = None,
+    quantity: int = 1
+) -> Optional[int]:
+    """
+    Create a position entry from Magic8 recommendation data.
+    
+    Args:
+        magic8_data: Magic8 prediction data containing example_trades
+        combo_type: Type of combo to create ('butterfly', 'iron_condor', 'vertical')
+        con_id: Optional IB contract ID (if available from order execution)
+        quantity: Number of contracts (default 1)
+        
+    Returns:
+        Position ID if created successfully, None otherwise
+    """
+    if 'example_trades' not in magic8_data:
+        logger.error("No example_trades in Magic8 data")
+        return None
+        
+    trade_info = magic8_data['example_trades'].get(combo_type)
+    if not trade_info:
+        logger.error(f"No {combo_type} trade in Magic8 example_trades")
+        return None
+    
+    # Parse strikes from Magic8 format (e.g., "5905/5855/5805")
+    strikes_str = trade_info.get('strikes', '')
+    option_type = trade_info.get('type', 'CALL')
+    
+    # Create strikes_info in DB format
+    if combo_type == 'butterfly':
+        # Convert "5905/5855/5805" to "C5805/C5855/C5905" (sorted)
+        strikes = sorted([float(s) for s in strikes_str.split('/')])
+        prefix = 'C' if 'CALL' in option_type else 'P'
+        strikes_info = f"{prefix}{strikes[0]}/{prefix}{strikes[1]}/{prefix}{strikes[2]}"
+        direction = 'neutral'
+        
+    elif combo_type == 'iron_condor':
+        # Convert "5905/5910/5780/5775" to "P5775/P5780_C5905/C5910"
+        parts = strikes_str.split('/')
+        if len(parts) == 4:
+            # Assume first two are calls, last two are puts
+            call_strikes = sorted([float(parts[0]), float(parts[1])])
+            put_strikes = sorted([float(parts[2]), float(parts[3])])
+            strikes_info = f"P{put_strikes[0]}/P{put_strikes[1]}_C{call_strikes[0]}/C{call_strikes[1]}"
+        else:
+            logger.error(f"Invalid iron condor strikes format: {strikes_str}")
+            return None
+        direction = 'neutral'
+        
+    elif combo_type == 'vertical':
+        # Convert "5820/5815" to "P5815/P5820" (sorted)
+        strikes = sorted([float(s) for s in strikes_str.split('/')])
+        prefix = 'C' if 'CALL' in option_type else 'P'
+        strikes_info = f"{prefix}{strikes[0]}/{prefix}{strikes[1]}"
+        # Determine direction based on trade action and option type
+        if trade_info.get('action') == 'BUY':
+            direction = 'bull' if 'CALL' in option_type else 'bear'
+        else:  # SELL
+            direction = 'bear' if 'CALL' in option_type else 'bull'
+    else:
+        logger.error(f"Unknown combo type: {combo_type}")
+        return None
+    
+    # Create position details
+    pos_details = {
+        'con_id': con_id,
+        'symbol': 'SPX',  # Assuming SPX for now
+        'combo_type': combo_type,
+        'direction': direction,
+        'strikes_info': strikes_info,
+        'quantity': quantity,
+        'entry_price_total': trade_info.get('price', 0.0)
+    }
+    
+    logger.info(f"Creating position from Magic8: {pos_details}")
+    return add_position_to_db(pos_details)
+
 
 def get_db_positions(status: Optional[str] = 'OPEN') -> List[Dict[str, Any]]:
     conn = get_db_connection()
@@ -92,13 +172,24 @@ def get_db_positions(status: Optional[str] = 'OPEN') -> List[Dict[str, Any]]:
     conn.close()
     return [dict(row) for row in rows]
 
+
+def get_position_by_con_id(con_id: int) -> Optional[Dict[str, Any]]:
+    """Get a specific position by contract ID."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM positions WHERE con_id=?", (con_id,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def update_position_in_db(con_id: int, pnl: Optional[float] = None, status: Optional[str] = None) -> bool:
     """
     Updates P&L and/or status for a position identified by con_id.
     Returns True if update was successful, False otherwise.
     """
     if pnl is None and status is None:
-        return False # Nothing to update
+        return False
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -120,34 +211,66 @@ def update_position_in_db(con_id: int, pnl: Optional[float] = None, status: Opti
     try:
         cur.execute(query, tuple(params))
         conn.commit()
-        return cur.rowcount > 0 # Check if any row was actually updated
+        return cur.rowcount > 0
     except Exception as e:
-        print(f"Error updating position {con_id} in DB: {e}")
+        logger.error(f"Error updating position {con_id} in DB: {e}")
         return False
     finally:
         conn.close()
+
+
+def get_daily_pnl() -> float:
+    """Calculate total P&L for all positions opened today."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    today = datetime.date.today().isoformat()
+    cur.execute(
+        """SELECT SUM(current_pnl) as total_pnl 
+           FROM positions 
+           WHERE DATE(entry_time) = ? AND status IN ('OPEN', 'CLOSED')""",
+        (today,)
+    )
+    
+    result = cur.fetchone()
+    conn.close()
+    
+    return result['total_pnl'] if result and result['total_pnl'] else 0.0
+
+
+def check_daily_loss_limit() -> bool:
+    """
+    Check if daily loss limit has been exceeded.
+    
+    Returns:
+        True if within limits, False if limit exceeded
+    """
+    from ..config import settings
+    
+    daily_pnl = get_daily_pnl()
+    if daily_pnl <= -settings.max_daily_loss:
+        logger.warning(f"Daily loss limit exceeded: ${abs(daily_pnl):.2f} >= ${settings.max_daily_loss}")
+        return False
+    return True
+
 
 async def sync_positions_with_ib(ib_client: IBClient):
     """
     Synchronizes positions in the local DB with those from IB.
     - Updates P&L for open positions.
     - Marks positions closed in DB if they are no longer in IB.
-    - Logs new positions found in IB but not in DB (does not add them automatically yet).
+    - Logs new positions found in IB but not in DB.
     """
-    print("Starting position synchronization with IB...")
+    logger.info("Starting position synchronization with IB...")
+    
     try:
-        # ib_client.get_positions() currently returns basic position info.
-        # For P&L, we ideally need ib.portfolio() which gives unrealizedPNL.
-        # Let's assume ib_client.get_positions() is enhanced or we call portfolio items here.
-        # For this subtask, we'll use ib_client.ib.portfolio() directly for richer data.
-        # This requires ib_client to have an active and connected `ib` instance.
-        await ib_client._ensure_connected() # Ensure connection
+        await ib_client._ensure_connected()
         ib_portfolio_items = ib_client.ib.portfolio()
     except ConnectionError as e:
-        print(f"IB Connection Error during sync_positions: {e}")
+        logger.error(f"IB Connection Error during sync_positions: {e}")
         return
     except Exception as e:
-        print(f"Error fetching portfolio from IB for sync: {e}")
+        logger.error(f"Error fetching portfolio from IB for sync: {e}")
         return
 
     db_open_positions = get_db_positions(status='OPEN')
@@ -157,41 +280,35 @@ async def sync_positions_with_ib(ib_client: IBClient):
 
     for item in ib_portfolio_items:
         contract = item.contract
-        if contract.secType != 'OPT': # Focus on options
+        if contract.secType != 'OPT':
             continue
 
         con_id = contract.conId
         ib_pos_conids_synced.add(con_id)
 
         unrealized_pnl = item.unrealizedPNL
-        # market_price = item.marketPrice # also available
 
         if con_id in db_pos_map_by_conid:
-            # Position exists in IB and in our DB as OPEN
-            print(f"Updating P&L for position con_id {con_id}: New P&L = {unrealized_pnl}")
-            update_position_in_db(con_id, pnl=unrealized_pnl, status='OPEN') # Keep status OPEN
+            # Position exists in both IB and DB
+            logger.info(f"Updating P&L for position con_id {con_id}: ${unrealized_pnl:.2f}")
+            update_position_in_db(con_id, pnl=unrealized_pnl, status='OPEN')
         else:
-            # Position exists in IB but not in our DB (or not as OPEN)
-            # This could be a new position opened outside Magic8-Companion, or one previously closed by us.
-            # For now, just log it. Future enhancement: add it to DB if truly new.
-            existing_db_pos = get_db_positions(status=None) # Check all statuses
-            if not any(p['con_id'] == con_id for p in existing_db_pos):
-                 print(f"Info: Position con_id {con_id} (Symbol: {contract.symbol} {contract.lastTradeDateOrContractMonth} {contract.strike} {contract.right}) " +
-                       f"found in IB but not in local DB. P&L: {unrealized_pnl}. Consider manual review or future auto-add feature.")
+            # Position in IB but not in DB
+            existing_db_pos = get_position_by_con_id(con_id)
+            if not existing_db_pos:
+                logger.info(
+                    f"New position found in IB: con_id {con_id} "
+                    f"({contract.symbol} {contract.lastTradeDateOrContractMonth} "
+                    f"{contract.strike} {contract.right}) P&L: ${unrealized_pnl:.2f}"
+                )
 
-
-    # Check for positions in DB that are no longer in IB (i.e., closed in IB)
+    # Check for positions in DB that are no longer in IB
     for con_id, db_pos in db_pos_map_by_conid.items():
         if con_id not in ib_pos_conids_synced:
-            print(f"Position con_id {con_id} (Symbol: {db_pos['symbol']}) is OPEN in DB but not found in IB. Marking as CLOSED.")
-            update_position_in_db(con_id, status='CLOSED', pnl=db_pos.get('current_pnl')) # Keep last known PNL or set to 0 if desired
+            logger.info(
+                f"Position con_id {con_id} ({db_pos['symbol']}) "
+                f"is OPEN in DB but not found in IB. Marking as CLOSED."
+            )
+            update_position_in_db(con_id, status='CLOSED')
 
-    print("Finished position synchronization.")
-
-# (The old mark_position_closed function can be removed if update_position_in_db with status='CLOSED' replaces it)
-# def mark_position_closed(pos_id: int): # Old function by primary key 'id'
-#     conn = get_db_connection()
-#     cur = conn.cursor()
-#     cur.execute("UPDATE positions SET status='CLOSED' WHERE id=?", (pos_id,))
-#     conn.commit()
-#     conn.close()
+    logger.info("Position synchronization completed")
