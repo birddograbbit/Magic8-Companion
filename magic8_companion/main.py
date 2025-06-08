@@ -76,8 +76,8 @@ class Magic8CompanionApp:
                 self.logger.warning("Running in degraded mode without IB connection")
                 # Don't fail completely - we can still process Magic8 data
             
-            # Setup scheduler
-            self.scheduler = setup_scheduler()
+            # Setup scheduler with IB client
+            self.scheduler = setup_scheduler(self.ib_client)
             self.scheduler.start()
             self.logger.info("Scheduler started with checkpoints at 10:30, 11:00, 12:30, 14:45 ET")
             
