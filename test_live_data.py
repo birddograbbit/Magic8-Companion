@@ -15,6 +15,7 @@ from magic8_companion.config import settings
 from magic8_companion.modules.market_analysis import MarketAnalyzer
 from magic8_companion.modules.combo_scorer import ComboScorer
 from magic8_companion.main import RecommendationEngine
+from magic8_companion.modules.ib_client_manager import IBClientManager
 
 
 async def test_live_data_for_symbol(symbol: str):
@@ -120,6 +121,14 @@ async def compare_mock_vs_live():
             print(f"  Live data error: {e}")
 
 
+async def cleanup_connections():
+    """Clean up any open IB connections."""
+    manager = IBClientManager()
+    await manager.disconnect()
+    # Small delay to ensure clean disconnection
+    await asyncio.sleep(0.5)
+
+
 def main():
     """Main test runner."""
     print("🚀 Magic8-Companion Live Data Testing")
@@ -150,22 +159,31 @@ def main():
     
     # Run tests
     try:
-        # Test individual symbols
+        # Test individual symbols with cleanup between tests
         asyncio.run(test_live_data_for_symbol("SPY"))
+        asyncio.run(cleanup_connections())
+        
         asyncio.run(test_live_data_for_symbol("QQQ"))
+        asyncio.run(cleanup_connections())
         
         # Test full recommendation engine
         asyncio.run(test_live_recommendations())
+        asyncio.run(cleanup_connections())
         
         # Compare mock vs live
         asyncio.run(compare_mock_vs_live())
+        asyncio.run(cleanup_connections())
         
         print("\n✅ All tests completed!")
         
     except KeyboardInterrupt:
         print("\n\n⚠️  Tests interrupted by user")
+        # Ensure cleanup on interrupt
+        asyncio.run(cleanup_connections())
     except Exception as e:
         print(f"\n\n❌ Test failed: {e}")
+        # Ensure cleanup on error
+        asyncio.run(cleanup_connections())
         sys.exit(1)
 
 
