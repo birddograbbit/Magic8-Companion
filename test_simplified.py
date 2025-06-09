@@ -9,10 +9,10 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent))
 
-from magic8_companion.main_simplified import RecommendationEngine
-from magic8_companion.config_simplified import settings
+from magic8_companion.main import RecommendationEngine
+from magic8_companion.config import settings
 
 async def test_recommendation_engine():
     """Test the recommendation engine."""
