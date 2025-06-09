@@ -1,2 +1,3 @@
 """Magic8-Companion package"""
-from .main import main
+# Temporarily disabled to allow simplified version to work
+# from .main import main
