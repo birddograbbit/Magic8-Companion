@@ -1,94 +1,18 @@
-# Magic8-Companion – Python Requirements
-# Focused dependencies for combo type selection + risk management
-# Updated: 2025-06-08
+# Core dependencies
+pydantic==2.11.0
+pydantic-settings==2.7.0
+python-dotenv==1.0.1
 
-# ==========================================
-# CORE DEPENDENCIES
-# ==========================================
+# Async
+asyncio
 
-# IB Integration (Essential)
-ib_async==1.0.3                    # IB API for position tracking and option data
-requests>=2.32.0                   # HTTP client for Magic8 integration
-python-dotenv>=1.0.0               # Environment configuration
-pydantic>=2.5.0                    # Configuration management
-pydantic-settings>=2.1.0           # Settings from environment
+# Scheduling
+pytz==2024.2
 
-# Scheduling & Async (Essential)
-APScheduler>=3.10.0                 # Scheduled checkpoint execution
-pytz>=2023.3                       # Timezone handling
-aiofiles>=23.0.0                   # Async file operations
+# Logging
+colorlog==6.10.0
 
-# ==========================================
-# MARKET ANALYSIS (Lightweight)
-# ==========================================
-# Note: Magic8-Companion needs basic market analysis to score combo types
-# But much simpler than full Magic8Clone system
-
-# Greeks & IV Calculation (For combo type scoring)
-py_vollib_vectorized==0.1.1        # Fast Greeks calculation for IV/volatility analysis
-numpy>=1.26.0                      # Numerical operations
-pandas>=2.1.0                      # Data manipulation
-
-# Dependencies for SPX-Gamma-Exposure functionality
-holidays>=0.34                     # Business day calculations for options expiry
-matplotlib>=3.7.0                  # Plotting for GEX analysis (optional)
-
-# ==========================================
-# ALERTS & INTEGRATION
-# ==========================================
-
-# Discord Integration
-discord.py>=2.3.0                  # Discord bot/webhook support
-# Alternative: Simple webhook approach using requests (already included)
-
-# Optional: Enhanced Magic8 Integration
-websockets>=12.0                   # WebSocket client for real-time Magic8 feed
-aiohttp>=3.9.0                     # Async HTTP client
-
-# ==========================================
-# DEVELOPMENT & TESTING
-# ==========================================
-
-pytest>=7.4.0                      # Testing framework
-pytest-asyncio>=0.23.0             # Async test support
-pytest-mock>=3.12.0                # Mocking for tests
-
-# ==========================================
-# MONITORING & UTILITIES
-# ==========================================
-
-prometheus-client>=0.19.0          # Metrics export (optional)
-click>=8.1.0                       # CLI interface
-rich>=13.7.0                       # Better terminal output
-
-# ==========================================
-# WHAT'S EXCLUDED (vs Magic8Clone)
-# ==========================================
-# These are NOT needed for Magic8-Companion:
-# 
-# ❌ zero-dte-trader (we don't form combos, just select types)
-# ❌ TimescaleDB/asyncpg (using SQLite for simplicity)
-# ❌ Redis (not needed for companion scale)
-# ❌ Heavy visualization libraries (streamlit, opstrat)
-# ❌ GPU libraries (OptionGreeksGPU - not needed for lightweight analysis)
-# ❌ Complex backtesting frameworks (optopsy)
-# ❌ Heavy TA libraries (pandas-ta)
-# ❌ spx-gamma-exposure as pip package (not properly packaged - see setup instructions)
-#
-# Magic8-Companion uses these libraries minimally:
-# ✅ py_vollib_vectorized: Only for basic IV/Greeks (not full option chain processing)
-# ✅ spx-gamma-exposure: Manual integration for basic GEX analysis (not complex wall calculations)  
-# ✅ ib_async: Only for position tracking and basic option data (not full chain processing)
-
-# ==========================================
-# ARCHITECTURE NOTES
-# ==========================================
-# Magic8-Companion Approach:
-# 1. Magic8 provides: Trend, range, specific trade recommendations
-# 2. Companion analyzes: IV environment, basic volatility, simple GEX
-# 3. Combines both: To score which combo TYPE is most favorable
-# 4. Much lighter than full Magic8Clone system
-#
-# SPX-Gamma-Exposure Integration:
-# The jensolson/SPX-Gamma-Exposure repository is not a proper Python package.
-# See setup instructions below for manual integration.
+# Market Data (for live data support)
+yfinance==0.2.50
+pandas==2.2.3
+numpy==1.26.4
