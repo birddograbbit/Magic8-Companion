@@ -1,3 +1,6 @@
 """Magic8-Companion package"""
-# Temporarily disabled to allow simplified version to work
-# from .main import main
+# Main entry point
+from .main import main
+
+__version__ = "1.0.0"
+__all__ = ["main"]
