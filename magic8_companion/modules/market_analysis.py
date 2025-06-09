@@ -11,7 +11,7 @@ import pandas as pd
 from collections import deque
 
 from ..config import settings
-from ..modules.ib_client import IBClient
+from ..modules.ib_client_manager import IBClientManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,20 +22,16 @@ class MarketAnalyzer:
     def __init__(self):
         self.use_mock_data = settings.use_mock_data
         self.provider = settings.market_data_provider
-        self.ib_client = None
+        self.ib_client_manager = None
         self.iv_history = {}  # Store historical IV for percentile calculation
         
-        # Initialize IB client if configured
+        # Initialize IB client manager if configured
         if self.provider == "ib" or not self.use_mock_data:
             try:
-                self.ib_client = IBClient(
-                    host=settings.ib_host,
-                    port=settings.ib_port,
-                    client_id=settings.ib_client_id
-                )
+                self.ib_client_manager = IBClientManager()
             except Exception as e:
-                logger.warning(f"Failed to initialize IB client: {e}")
-                self.ib_client = None
+                logger.warning(f"Failed to initialize IB client manager: {e}")
+                self.ib_client_manager = None
         
     async def analyze_symbol(self, symbol: str) -> Optional[Dict]:
         """Analyze market conditions for a symbol."""
@@ -49,7 +45,7 @@ class MarketAnalyzer:
     async def _get_live_market_data(self, symbol: str) -> Optional[Dict]:
         """Get live market data, prioritizing IB then falling back to other providers."""
         # Always try IB first if available
-        if self.ib_client:
+        if self.ib_client_manager:
             try:
                 return await self._get_ib_market_data(symbol)
             except Exception as e:
@@ -74,11 +70,16 @@ class MarketAnalyzer:
     async def _get_ib_market_data(self, symbol: str) -> Dict:
         """Get market data from Interactive Brokers."""
         try:
+            # Get the singleton IB client
+            ib_client = await self.ib_client_manager.get_client()
+            if not ib_client:
+                raise ConnectionError("Failed to get IB client from manager")
+            
             # Ensure connection
-            await self.ib_client._ensure_connected()
+            await ib_client._ensure_connected()
             
             # Get ATM options data (includes IV)
-            atm_options = await self.ib_client.get_atm_options([symbol], days_to_expiry=0)
+            atm_options = await ib_client.get_atm_options([symbol], days_to_expiry=0)
             
             if not atm_options:
                 raise ValueError(f"No ATM options data available for {symbol}")
