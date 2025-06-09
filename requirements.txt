@@ -12,7 +12,10 @@ pytz==2024.2
 # Logging
 colorlog==6.10.0
 
-# Market Data (for live data support)
+# Market Data
 yfinance==0.2.50
 pandas==2.2.3
 numpy==1.26.4
+
+# Interactive Brokers
+ib_async==1.0.1
