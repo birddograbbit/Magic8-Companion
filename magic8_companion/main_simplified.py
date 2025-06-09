@@ -16,10 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Any
 
-from .config import settings
-from .modules.market_analysis import MarketAnalyzer
-from .modules.combo_scorer import ComboScorer
-from .utils.scheduler import SimpleScheduler
+from .config_simplified import settings
+from .modules.market_analysis_simplified import MarketAnalyzer
+from .modules.combo_scorer_simplified import ComboScorer
+from .utils.scheduler_simplified import SimpleScheduler
 
 # Setup logging
 def setup_logging():
