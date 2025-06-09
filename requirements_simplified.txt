@@ -1,0 +1,11 @@
+# Simplified Magic8-Companion Requirements
+# Minimal dependencies for recommendation engine
+
+# Configuration management
+pydantic-settings>=2.0.0
+
+# Time zone handling
+pytz>=2023.3
+
+# Optional: For enhanced testing
+pytest>=7.0.0
