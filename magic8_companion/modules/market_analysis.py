@@ -1,25 +1,41 @@
 """
 Market analyzer for Magic8-Companion.
-Supports both mock data and live market data via Yahoo Finance.
+Prioritizes IB data for real-time options information, falls back to Yahoo Finance.
 """
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
 import pandas as pd
+from collections import deque
 
 from ..config import settings
+from ..modules.ib_client import IBClient
 
 logger = logging.getLogger(__name__)
 
 
 class MarketAnalyzer:
-    """Market analyzer supporting both mock and live data."""
+    """Market analyzer supporting IB (primary) and Yahoo Finance (fallback)."""
     
     def __init__(self):
         self.use_mock_data = settings.use_mock_data
         self.provider = settings.market_data_provider
+        self.ib_client = None
+        self.iv_history = {}  # Store historical IV for percentile calculation
+        
+        # Initialize IB client if configured
+        if self.provider == "ib" or not self.use_mock_data:
+            try:
+                self.ib_client = IBClient(
+                    host=settings.ib_host,
+                    port=settings.ib_port,
+                    client_id=settings.ib_client_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize IB client: {e}")
+                self.ib_client = None
         
     async def analyze_symbol(self, symbol: str) -> Optional[Dict]:
         """Analyze market conditions for a symbol."""
@@ -31,16 +47,20 @@ class MarketAnalyzer:
             return await self._get_live_market_data(symbol)
     
     async def _get_live_market_data(self, symbol: str) -> Optional[Dict]:
-        """Get live market data from configured provider."""
+        """Get live market data, prioritizing IB then falling back to other providers."""
+        # Always try IB first if available
+        if self.ib_client:
+            try:
+                return await self._get_ib_market_data(symbol)
+            except Exception as e:
+                logger.warning(f"IB data fetch failed for {symbol}: {e}")
+                logger.info("Falling back to alternative data provider")
+        
+        # Fallback logic
         try:
-            if self.provider == "yahoo":
-                return self._get_yahoo_market_data(symbol)
-            elif self.provider == "ib":
-                # TODO: Implement IB data fetching
-                logger.warning("IB data provider not implemented yet, using Yahoo")
+            if self.provider == "yahoo" or self.provider == "ib":
                 return self._get_yahoo_market_data(symbol)
             elif self.provider == "polygon":
-                # TODO: Implement Polygon data fetching
                 logger.warning("Polygon data provider not implemented yet, using Yahoo")
                 return self._get_yahoo_market_data(symbol)
             else:
@@ -50,6 +70,95 @@ class MarketAnalyzer:
             logger.error(f"Error fetching live data for {symbol}: {e}")
             logger.info("Falling back to mock data")
             return self._get_mock_market_data(symbol)
+    
+    async def _get_ib_market_data(self, symbol: str) -> Dict:
+        """Get market data from Interactive Brokers."""
+        try:
+            # Ensure connection
+            await self.ib_client._ensure_connected()
+            
+            # Get ATM options data (includes IV)
+            atm_options = await self.ib_client.get_atm_options([symbol], days_to_expiry=0)
+            
+            if not atm_options:
+                raise ValueError(f"No ATM options data available for {symbol}")
+            
+            # Extract data from ATM options
+            current_price = atm_options[0].get('underlying_price_at_fetch', 0)
+            
+            # Calculate average IV from ATM options
+            call_ivs = [opt['implied_volatility'] for opt in atm_options 
+                       if opt['right'] == 'C' and opt['implied_volatility'] is not None]
+            put_ivs = [opt['implied_volatility'] for opt in atm_options 
+                      if opt['right'] == 'P' and opt['implied_volatility'] is not None]
+            
+            if not call_ivs and not put_ivs:
+                raise ValueError(f"No IV data available for {symbol}")
+            
+            # Average of ATM call and put IVs
+            all_ivs = call_ivs + put_ivs
+            iv = np.mean(all_ivs) * 100  # Convert to percentage
+            
+            # Store IV for historical tracking
+            self._store_iv_history(symbol, iv)
+            
+            # Calculate IV percentile based on historical data
+            iv_percentile = self._calculate_iv_percentile(symbol, iv)
+            
+            # Calculate expected daily range
+            expected_range_pct = iv / 100 / np.sqrt(252)  # Daily move
+            
+            # Determine gamma environment based on ATM bid-ask spreads
+            atm_call = next((opt for opt in atm_options if opt['right'] == 'C' and 
+                            abs(opt['strike'] - current_price) / current_price < 0.01), None)
+            
+            if atm_call and atm_call['bid'] and atm_call['ask']:
+                spread_pct = (atm_call['ask'] - atm_call['bid']) / current_price
+                if spread_pct < 0.001:  # Tight spread
+                    gamma_env = "High gamma, liquid markets"
+                else:
+                    gamma_env = "Moderate gamma environment"
+            else:
+                gamma_env = self._determine_gamma_environment(iv_percentile, expected_range_pct)
+            
+            return {
+                "symbol": symbol,
+                "iv_percentile": round(iv_percentile, 1),
+                "expected_range_pct": round(expected_range_pct, 4),
+                "gamma_environment": gamma_env,
+                "current_price": round(current_price, 2),
+                "implied_vol": round(iv, 1),
+                "atm_options_count": len(atm_options),
+                "analysis_timestamp": datetime.now().isoformat(),
+                "is_mock_data": False,
+                "data_provider": "ib"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching IB data for {symbol}: {e}")
+            raise
+    
+    def _store_iv_history(self, symbol: str, iv: float):
+        """Store IV value for historical percentile calculation."""
+        if symbol not in self.iv_history:
+            self.iv_history[symbol] = deque(maxlen=252)  # Store 1 year of daily values
+        self.iv_history[symbol].append(iv)
+    
+    def _calculate_iv_percentile(self, symbol: str, current_iv: float) -> float:
+        """Calculate IV percentile based on historical data."""
+        if symbol not in self.iv_history or len(self.iv_history[symbol]) < 20:
+            # Not enough history, use a simple heuristic
+            # Low IV: < 20, Medium: 20-50, High: > 50
+            if current_iv < 20:
+                return 25.0  # Low percentile
+            elif current_iv < 50:
+                return 50.0  # Medium percentile
+            else:
+                return 75.0  # High percentile
+        
+        # Calculate actual percentile
+        history = list(self.iv_history[symbol])
+        return (sum(1 for iv in history if iv <= current_iv) / len(history)) * 100
     
     def _get_yahoo_market_data(self, symbol: str) -> Dict:
         """Get market data from Yahoo Finance."""
@@ -90,8 +199,9 @@ class MarketAnalyzer:
                     atm_put_iv = puts[puts['strike'] == atm_strike]['impliedVolatility'].iloc[0]
                     iv = (atm_call_iv + atm_put_iv) / 2 * 100
                     
-                    # Calculate IV percentile (simplified - compare to realized vol)
-                    iv_percentile = min(100, (iv / realized_vol) * 50)
+                    # Store and calculate IV percentile
+                    self._store_iv_history(symbol, iv)
+                    iv_percentile = self._calculate_iv_percentile(symbol, iv)
                 else:
                     iv = realized_vol
                     iv_percentile = 50  # Default to middle
@@ -127,16 +237,16 @@ class MarketAnalyzer:
         """Generate mock market data for testing."""
         # Simulate different market conditions based on symbol
         if symbol == "SPX":
-            base_iv = 65.0
+            base_iv = 15.0
             base_range = 0.008
         elif symbol == "SPY":
-            base_iv = 62.0
+            base_iv = 18.0
             base_range = 0.007
         elif symbol == "QQQ":
-            base_iv = 70.0
+            base_iv = 22.0
             base_range = 0.012
         elif symbol == "RUT":
-            base_iv = 75.0
+            base_iv = 25.0
             base_range = 0.015
         else:
             base_iv = settings.mock_iv_percentile
@@ -148,11 +258,14 @@ class MarketAnalyzer:
         # Make conditions more volatile in afternoon
         time_multiplier = 1.0 + (hour - 12) * 0.1 if hour > 12 else 1.0
         
+        iv = base_iv * time_multiplier
+        iv_percentile = min(100, iv * 2)  # Simple mock percentile
+        
         return {
             "symbol": symbol,
-            "iv_percentile": base_iv * time_multiplier,
+            "iv_percentile": iv_percentile,
             "expected_range_pct": base_range * time_multiplier,
-            "gamma_environment": self._determine_gamma_environment(base_iv, base_range),
+            "gamma_environment": self._determine_gamma_environment(iv_percentile, base_range),
             "analysis_timestamp": datetime.now().isoformat(),
             "is_mock_data": True
         }
