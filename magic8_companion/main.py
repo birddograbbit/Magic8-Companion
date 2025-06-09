@@ -1,23 +1,25 @@
+#!/usr/bin/env python3
 """
-Magic8-Companion Main Orchestrator
+Magic8-Companion - Simplified Trade Type Recommendation Engine
 
-Manages application lifecycle, handles graceful shutdowns, and coordinates
-all components with proper error handling and recovery.
+Simplified companion system that analyzes market conditions at scheduled intervals
+and outputs trade type recommendations for consumption by DiscordTrading system.
+
+Focus: Ship-fast, minimal complexity, pure recommendation engine.
 """
 import asyncio
+import json
+import logging
 import signal
 import sys
-import logging
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-from contextlib import asynccontextmanager
+from typing import Dict, Optional, Any
 
-from .utils.scheduler import setup_scheduler, scheduled_sync_positions
-from .modules.ib_client import IBClient
-from .modules.alert_manager import send_discord_alert
-from .utils.db_client import init_db
 from .config import settings
-
+from .modules.market_analysis import MarketAnalyzer
+from .modules.combo_scorer import ComboScorer
+from .utils.scheduler import SimpleScheduler
 
 # Setup logging
 def setup_logging():
@@ -34,200 +36,224 @@ def setup_logging():
         ]
     )
     
-    # Set specific log levels for noisy libraries
-    logging.getLogger('ib_async').setLevel(logging.WARNING)
-    logging.getLogger('apscheduler').setLevel(logging.WARNING)
-    
     return logging.getLogger(__name__)
 
+logger = setup_logging()
 
-class Magic8CompanionApp:
-    """Main application class with lifecycle management."""
+
+class RecommendationEngine:
+    """Core recommendation engine for trade type analysis."""
     
     def __init__(self):
-        self.logger = setup_logging()
-        self.scheduler = None
-        self.ib_client: Optional[IBClient] = None
+        self.market_analyzer = MarketAnalyzer()
+        self.combo_scorer = ComboScorer()
+        self.output_file = Path(settings.output_file_path)
+        self.supported_symbols = settings.supported_symbols
+        
+    async def generate_recommendations(self) -> Dict[str, Any]:
+        """Generate trade type recommendations for all supported symbols."""
+        logger.info("Generating trade type recommendations...")
+        
+        recommendations = {}
+        
+        for symbol in self.supported_symbols:
+            try:
+                # Analyze market conditions for this symbol
+                market_data = await self.market_analyzer.analyze_symbol(symbol)
+                
+                if not market_data:
+                    logger.warning(f"No market data available for {symbol}")
+                    continue
+                
+                # Score combo types
+                scores = self.combo_scorer.score_combo_types(market_data, symbol)
+                
+                # Determine best recommendation
+                recommendation = self._build_recommendation(scores, market_data, symbol)
+                
+                if recommendation:
+                    recommendations[symbol] = recommendation
+                    logger.info(f"{symbol}: {recommendation['preferred_strategy']} (Score: {recommendation['score']})")
+                
+            except Exception as e:
+                logger.error(f"Error generating recommendation for {symbol}: {e}")
+                
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "checkpoint_time": datetime.now().strftime("%H:%M ET"),
+            "recommendations": recommendations
+        }
+    
+    def _build_recommendation(self, scores: Dict[str, float], market_data: Dict, symbol: str) -> Optional[Dict[str, Any]]:
+        """Build recommendation from combo scores."""
+        if not scores:
+            return None
+            
+        # Find best strategy
+        best_strategy = max(scores.keys(), key=lambda k: scores[k])
+        best_score = scores[best_strategy]
+        
+        # Only recommend if score meets threshold
+        if best_score < settings.min_recommendation_score:
+            logger.info(f"{symbol}: No clear recommendation (best score: {best_score})")
+            return None
+            
+        # Check confidence level
+        second_best_score = sorted(scores.values())[-2] if len(scores) > 1 else 0
+        score_gap = best_score - second_best_score
+        
+        if score_gap < settings.min_score_gap:
+            logger.info(f"{symbol}: Score gap too small ({score_gap})")
+            return None
+            
+        confidence = "HIGH" if best_score >= 85 else "MEDIUM"
+        
+        return {
+            "preferred_strategy": best_strategy,
+            "score": round(best_score, 1),
+            "confidence": confidence,
+            "all_scores": {k: round(v, 1) for k, v in scores.items()},
+            "market_conditions": {
+                "iv_rank": market_data.get("iv_percentile", "N/A"),
+                "range_expectation": market_data.get("expected_range_pct", "N/A"),
+                "gamma_environment": market_data.get("gamma_environment", "N/A")
+            },
+            "rationale": self._build_rationale(best_strategy, market_data, best_score)
+        }
+    
+    def _build_rationale(self, strategy: str, market_data: Dict, score: float) -> str:
+        """Build human-readable rationale for recommendation."""
+        iv_rank = market_data.get("iv_percentile", 0)
+        range_pct = market_data.get("expected_range_pct", 0)
+        
+        if strategy == "Butterfly":
+            return f"Low volatility environment (IV: {iv_rank}%) with tight expected range ({range_pct:.1%})"
+        elif strategy == "Iron_Condor":
+            return f"Range-bound conditions (Range: {range_pct:.1%}) with moderate volatility (IV: {iv_rank}%)"
+        elif strategy == "Vertical":
+            return f"Directional opportunity with wide expected range ({range_pct:.1%})"
+        else:
+            return f"Favorable conditions detected (Score: {score})"
+    
+    async def save_recommendations(self, recommendations: Dict[str, Any]):
+        """Save recommendations to output file."""
+        try:
+            # Ensure output directory exists
+            self.output_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write to temp file first, then move (atomic operation)
+            temp_file = self.output_file.with_suffix('.tmp')
+            
+            with open(temp_file, 'w') as f:
+                json.dump(recommendations, f, indent=2)
+            
+            # Atomic move
+            temp_file.replace(self.output_file)
+            
+            logger.info(f"Recommendations saved to {self.output_file}")
+            
+            # Also log summary
+            if recommendations.get("recommendations"):
+                for symbol, rec in recommendations["recommendations"].items():
+                    logger.info(f"📊 {symbol}: {rec['preferred_strategy']} ({rec['confidence']} confidence)")
+            else:
+                logger.info("📊 No recommendations generated this checkpoint")
+                
+        except Exception as e:
+            logger.error(f"Error saving recommendations: {e}")
+
+
+class SimplifiedMagic8Companion:
+    """Simplified Magic8-Companion application."""
+    
+    def __init__(self):
+        self.recommendation_engine = RecommendationEngine()
+        self.scheduler = SimpleScheduler()
         self.shutdown_event = asyncio.Event()
-        self.tasks = []
         
     async def initialize(self):
-        """Initialize all components."""
-        self.logger.info("Initializing Magic8-Companion...")
+        """Initialize the application."""
+        logger.info("Initializing Magic8-Companion (Simplified)...")
+        logger.info(f"Output file: {settings.output_file_path}")
+        logger.info(f"Supported symbols: {settings.supported_symbols}")
+        logger.info(f"Checkpoints: {settings.checkpoint_times}")
         
+        # Setup scheduler
+        for checkpoint_time in settings.checkpoint_times:
+            self.scheduler.add_checkpoint(checkpoint_time, self.run_checkpoint)
+            
+        logger.info("Initialization complete")
+    
+    async def run_checkpoint(self):
+        """Execute scheduled checkpoint."""
         try:
-            # Initialize database
-            init_db()
-            self.logger.info("Database initialized")
+            checkpoint_time = datetime.now().strftime("%H:%M ET")
+            logger.info(f"🎯 CHECKPOINT {checkpoint_time}")
             
-            # Initialize IB client
-            self.ib_client = IBClient(
-                host=settings.ib_host,
-                port=settings.ib_port,
-                client_id=settings.ib_client_id
-            )
+            # Generate recommendations
+            recommendations = await self.recommendation_engine.generate_recommendations()
             
-            # Try to connect to IB
-            try:
-                await self.ib_client._ensure_connected()
-                self.logger.info("Connected to Interactive Brokers")
-            except ConnectionError as e:
-                self.logger.error(f"Failed to connect to IB: {e}")
-                self.logger.warning("Running in degraded mode without IB connection")
-                # Don't fail completely - we can still process Magic8 data
+            # Save to output file
+            await self.recommendation_engine.save_recommendations(recommendations)
             
-            # Setup scheduler with IB client
-            self.scheduler = setup_scheduler(self.ib_client)
-            self.scheduler.start()
-            self.logger.info("Scheduler started with checkpoints at 10:30, 11:00, 12:30, 14:45 ET")
-            
-            # Send startup notification
-            await self._send_startup_alert()
-            
-            # Initial position sync
-            if self.ib_client and self.ib_client.ib.isConnected():
-                self.logger.info("Running initial position sync...")
-                await scheduled_sync_positions()
+            # Log summary
+            rec_count = len(recommendations.get("recommendations", {}))
+            logger.info(f"✅ Checkpoint complete - {rec_count} recommendations generated")
             
         except Exception as e:
-            self.logger.error(f"Initialization failed: {e}", exc_info=True)
-            raise
-    
-    async def _send_startup_alert(self):
-        """Send Discord notification on startup."""
-        try:
-            startup_msg = (
-                "🚀 **Magic8-Companion Started**\n"
-                f"• IB Connection: {'✅ Connected' if self.ib_client and self.ib_client.ib.isConnected() else '❌ Disconnected'}\n"
-                f"• Checkpoints: 10:30, 11:00, 12:30, 14:45 ET\n"
-                f"• Position Sync: Every 2 minutes\n"
-                f"• Max Position Loss: ${settings.max_position_loss:,}\n"
-                f"• Max Daily Loss: ${settings.max_daily_loss:,}"
-            )
-            send_discord_alert(startup_msg)
-        except Exception as e:
-            self.logger.error(f"Failed to send startup alert: {e}")
-    
-    async def shutdown(self):
-        """Graceful shutdown of all components."""
-        self.logger.info("Shutting down Magic8-Companion...")
-        
-        try:
-            # Send shutdown notification
-            send_discord_alert("🛑 **Magic8-Companion Shutting Down**")
-        except:
-            pass  # Don't fail shutdown due to alert failure
-        
-        # Stop scheduler
-        if self.scheduler:
-            self.scheduler.shutdown(wait=False)
-            self.logger.info("Scheduler stopped")
-        
-        # Disconnect from IB
-        if self.ib_client:
-            await self.ib_client.disconnect()
-            self.logger.info("Disconnected from Interactive Brokers")
-        
-        # Cancel any running tasks
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
-        
-        # Set shutdown event
-        self.shutdown_event.set()
-        
-        self.logger.info("Shutdown complete")
-    
-    async def monitor_ib_connection(self):
-        """Monitor IB connection and attempt reconnection if needed."""
-        while not self.shutdown_event.is_set():
-            try:
-                if self.ib_client and not self.ib_client.ib.isConnected():
-                    self.logger.warning("IB connection lost, attempting reconnection...")
-                    try:
-                        await self.ib_client._ensure_connected()
-                        self.logger.info("Successfully reconnected to IB")
-                        send_discord_alert("✅ **IB Connection Restored**")
-                    except Exception as e:
-                        self.logger.error(f"IB reconnection failed: {e}")
-                
-                # Check every 30 seconds
-                await asyncio.sleep(30)
-                
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Error in connection monitor: {e}")
-                await asyncio.sleep(60)  # Wait longer on error
+            logger.error(f"Error in checkpoint execution: {e}")
     
     async def run(self):
         """Main application loop."""
-        self.logger.info("Magic8-Companion running...")
-        
-        # Start connection monitor
-        monitor_task = asyncio.create_task(self.monitor_ib_connection())
-        self.tasks.append(monitor_task)
+        logger.info("Magic8-Companion running...")
+        logger.info("Waiting for scheduled checkpoints...")
         
         try:
-            # Wait for shutdown signal
+            # Start scheduler
+            await self.scheduler.start()
+            
+            # Wait for shutdown
             await self.shutdown_event.wait()
+            
         except Exception as e:
-            self.logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
+            logger.error(f"Error in main loop: {e}")
         finally:
             await self.shutdown()
+    
+    async def shutdown(self):
+        """Graceful shutdown."""
+        logger.info("Shutting down Magic8-Companion...")
+        
+        if self.scheduler:
+            await self.scheduler.stop()
+            
+        logger.info("Shutdown complete")
+    
+    def handle_signal(self, signum, frame):
+        """Handle shutdown signals."""
+        logger.info(f"Received signal {signum}")
+        self.shutdown_event.set()
 
 
-@asynccontextmanager
-async def app_lifespan():
-    """Async context manager for app lifecycle."""
-    app = Magic8CompanionApp()
+async def main():
+    """Main entry point."""
+    print("Starting Magic8-Companion (Simplified Trade Type Recommender)...")
+    
+    app = SimplifiedMagic8Companion()
+    
+    # Setup signal handlers
+    signal.signal(signal.SIGINT, app.handle_signal)
+    signal.signal(signal.SIGTERM, app.handle_signal)
     
     try:
         await app.initialize()
-        yield app
-    finally:
-        await app.shutdown()
-
-
-def handle_signals(app: Magic8CompanionApp):
-    """Setup signal handlers for graceful shutdown."""
-    def signal_handler(signum, frame):
-        app.logger.info(f"Received signal {signum}")
-        asyncio.create_task(app.shutdown())
-    
-    # Handle SIGINT (Ctrl+C) and SIGTERM
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Windows-specific signal handling
-    if sys.platform == 'win32':
-        signal.signal(signal.SIGBREAK, signal_handler)
-
-
-async def async_main():
-    """Async main entry point."""
-    async with app_lifespan() as app:
-        # Setup signal handlers
-        handle_signals(app)
-        
-        # Run the application
         await app.run()
-
-
-def main():
-    """Main entry point."""
-    print("Starting Magic8-Companion...")
-    print(f"Configuration loaded from: {settings.Config.env_file}")
-    
-    try:
-        # Run the async main
-        asyncio.run(async_main())
     except KeyboardInterrupt:
-        print("\nShutdown requested via keyboard interrupt")
+        logger.info("Shutdown requested via keyboard interrupt")
     except Exception as e:
-        print(f"Fatal error: {e}")
+        logger.error(f"Fatal error: {e}")
         sys.exit(1)
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
