@@ -10,7 +10,7 @@ import logging
 from functools import lru_cache
 
 try:
-    import py_vollib_vectorized as vol
+    from py_vollib_vectorized import get_all_greeks
     VECTORIZED_AVAILABLE = True
 except ImportError:
     import py_vollib.black_scholes.greeks.analytical as vol_fallback
@@ -90,23 +90,27 @@ class GreeksWrapper:
         option_type: str
     ) -> Dict[str, np.ndarray]:
         """Calculate Greeks using vectorized library (fast)."""
-        greeks = {
-            'delta': vol.black_scholes.greeks.analytical.delta(
-                option_type, spot, strikes, time_to_exp, self.risk_free_rate, iv
-            ),
-            'gamma': vol.black_scholes.greeks.analytical.gamma(
-                option_type, spot, strikes, time_to_exp, self.risk_free_rate, iv
-            ),
-            'theta': vol.black_scholes.greeks.analytical.theta(
-                option_type, spot, strikes, time_to_exp, self.risk_free_rate, iv
-            ),
-            'vega': vol.black_scholes.greeks.analytical.vega(
-                option_type, spot, strikes, time_to_exp, self.risk_free_rate, iv
-            ),
-            'rho': vol.black_scholes.greeks.analytical.rho(
-                option_type, spot, strikes, time_to_exp, self.risk_free_rate, iv
-            )
-        }
+        # py_vollib_vectorized expects 'flag' parameter as 'c' or 'p'
+        # S: spot price
+        # K: strikes  
+        # t: time to expiration
+        # r: risk-free rate
+        # sigma: implied volatility
+        greeks = get_all_greeks(
+            flag=option_type,
+            S=spot,
+            K=strikes,
+            t=time_to_exp,
+            r=self.risk_free_rate,
+            sigma=iv,
+            model='black_scholes',
+            return_as='dict'
+        )
+        
+        # Ensure all values are numpy arrays
+        for key in greeks:
+            greeks[key] = np.atleast_1d(greeks[key])
+            
         return greeks
     
     def _calculate_standard(
