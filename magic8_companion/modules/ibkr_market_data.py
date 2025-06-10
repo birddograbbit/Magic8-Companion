@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Union
 from datetime import datetime, timedelta
 import numpy as np
 from ib_async import IB, Stock, Option, Contract, util
-import os
+from magic8_companion.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,11 @@ class IBKRMarketData:
         self.ib = IB()
         self.connected = False
         
-        # Configuration from environment
-        self.host = os.getenv('IBKR_HOST', '127.0.0.1')
-        self.port = int(os.getenv('IBKR_PORT', '7497'))  # 7497 for paper, 7496 for live
-        self.client_id = int(os.getenv('IBKR_CLIENT_ID', '1'))
-        self.fallback_to_yahoo = os.getenv('IBKR_FALLBACK_TO_YAHOO', 'true').lower() == 'true'
+        # Configuration from settings
+        self.host = settings.ibkr_host
+        self.port = settings.ibkr_port
+        self.client_id = settings.ibkr_client_id
+        self.fallback_to_yahoo = settings.ibkr_fallback_to_yahoo
         
         # Symbol mapping for IBKR
         self.symbol_map = {
