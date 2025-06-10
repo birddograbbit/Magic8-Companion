@@ -4,11 +4,11 @@ Integrates all enhanced indicators while maintaining backward compatibility.
 Ship-fast approach: Wrapper around existing scorer with optional enhancements.
 """
 
-import os
 import logging
 from typing import Dict, Optional, List
 from magic8_companion.modules.combo_scorer_simplified import ComboScorer
 from magic8_companion.wrappers import GreeksWrapper, GammaExposureWrapper, VolumeOIWrapper
+from magic8_companion.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +27,10 @@ class EnhancedComboScorer(ComboScorer):
         # Define the strategies we support
         self.strategies = ["Butterfly", "Iron_Condor", "Vertical"]
         
-        # Check if enhancements are enabled
-        self.enable_greeks = os.getenv('ENABLE_GREEKS', 'false').lower() == 'true'
-        self.enable_advanced_gex = os.getenv('ENABLE_ADVANCED_GEX', 'false').lower() == 'true'
-        self.enable_volume_analysis = os.getenv('ENABLE_VOLUME_ANALYSIS', 'false').lower() == 'true'
+        # Check if enhancements are enabled from settings
+        self.enable_greeks = settings.enable_greeks
+        self.enable_advanced_gex = settings.enable_advanced_gex
+        self.enable_volume_analysis = settings.enable_volume_analysis
         
         # Initialize wrappers if enabled
         if self.enable_greeks:
@@ -228,13 +228,6 @@ class EnhancedComboScorer(ComboScorer):
 # Example usage and testing
 if __name__ == "__main__":
     # Test with mock data
-    import os
-    
-    # Enable all enhancements for testing
-    os.environ['ENABLE_GREEKS'] = 'true'
-    os.environ['ENABLE_ADVANCED_GEX'] = 'true'
-    os.environ['ENABLE_VOLUME_ANALYSIS'] = 'true'
-    
     scorer = EnhancedComboScorer()
     
     # Mock market conditions with option chain
