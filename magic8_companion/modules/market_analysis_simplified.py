@@ -1,22 +1,40 @@
 """
 Simplified market analyzer for Magic8-Companion.
 Provides basic market analysis without requiring live data feeds.
+Supports both Yahoo Finance and Interactive Brokers data sources.
 """
 import logging
+import os
 from typing import Dict, Optional
 from ..config_simplified import settings
-from .real_market_data import RealMarketData
 import random
 
 logger = logging.getLogger(__name__)
 
 
 class MarketAnalyzer:
-    """Simplified market analyzer using mock data or basic calculations."""
+    """Simplified market analyzer using mock data or live data from IBKR/Yahoo."""
     
     def __init__(self):
         self.use_mock_data = settings.use_mock_data
-        self.real_data_fetcher = RealMarketData() if not self.use_mock_data else None
+        self.use_ibkr_data = os.getenv('USE_IBKR_DATA', 'false').lower() == 'true'
+        self.data_fetcher = None
+        
+        # Initialize appropriate data fetcher
+        if not self.use_mock_data:
+            if self.use_ibkr_data:
+                try:
+                    from .ibkr_market_data import IBKRMarketData
+                    self.data_fetcher = IBKRMarketData()
+                    logger.info("Using Interactive Brokers for market data")
+                except ImportError:
+                    logger.error("ib_insync not installed, falling back to Yahoo Finance")
+                    from .real_market_data import RealMarketData
+                    self.data_fetcher = RealMarketData()
+            else:
+                from .real_market_data import RealMarketData
+                self.data_fetcher = RealMarketData()
+                logger.info("Using Yahoo Finance for market data")
         
     async def analyze_symbol(self, symbol: str) -> Optional[Dict]:
         """Analyze market conditions for a symbol."""
@@ -25,11 +43,20 @@ class MarketAnalyzer:
         if self.use_mock_data:
             return self._get_mock_market_data(symbol)
         else:
-            # Use real market data
+            # Use real market data (IBKR or Yahoo)
             try:
-                real_data = await self.real_data_fetcher.get_market_data(symbol)
+                if self.use_ibkr_data and hasattr(self.data_fetcher, 'connect'):
+                    # IBKR requires connection management
+                    from .ibkr_market_data import IBKRConnection
+                    async with IBKRConnection(self.data_fetcher) as market_data:
+                        real_data = await market_data.get_market_data(symbol)
+                else:
+                    # Yahoo doesn't need connection management
+                    real_data = await self.data_fetcher.get_market_data(symbol)
+                
                 if real_data:
-                    logger.info(f"Successfully fetched real market data for {symbol}")
+                    source = real_data.get('data_source', 'Yahoo')
+                    logger.info(f"Successfully fetched {source} market data for {symbol}")
                     return real_data
                 else:
                     logger.warning(f"Failed to fetch real data for {symbol}, falling back to mock")
@@ -84,7 +111,8 @@ class MarketAnalyzer:
             "expected_range_pct": round(scenario["range"], 4),
             "gamma_environment": scenario["env"],
             "analysis_timestamp": datetime.now().isoformat(),
-            "is_mock_data": True
+            "is_mock_data": True,
+            "data_source": "Mock"
         }
     
     def _determine_gamma_environment(self, iv_percentile: float, range_pct: float) -> str:
