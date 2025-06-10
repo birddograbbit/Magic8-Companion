@@ -5,6 +5,7 @@ Provides basic market analysis without requiring live data feeds.
 import logging
 from typing import Dict, Optional
 from ..config_simplified import settings
+from .real_market_data import RealMarketData
 import random
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ class MarketAnalyzer:
     
     def __init__(self):
         self.use_mock_data = settings.use_mock_data
+        self.real_data_fetcher = RealMarketData() if not self.use_mock_data else None
         
     async def analyze_symbol(self, symbol: str) -> Optional[Dict]:
         """Analyze market conditions for a symbol."""
@@ -23,9 +25,18 @@ class MarketAnalyzer:
         if self.use_mock_data:
             return self._get_mock_market_data(symbol)
         else:
-            # TODO: Implement real market data analysis
-            logger.warning("Real market data analysis not implemented yet, using mock data")
-            return self._get_mock_market_data(symbol)
+            # Use real market data
+            try:
+                real_data = await self.real_data_fetcher.get_market_data(symbol)
+                if real_data:
+                    logger.info(f"Successfully fetched real market data for {symbol}")
+                    return real_data
+                else:
+                    logger.warning(f"Failed to fetch real data for {symbol}, falling back to mock")
+                    return self._get_mock_market_data(symbol)
+            except Exception as e:
+                logger.error(f"Error fetching real market data: {e}, using mock data")
+                return self._get_mock_market_data(symbol)
     
     def _get_mock_market_data(self, symbol: str) -> Dict:
         """Generate mock market data for testing with more realistic variations."""
