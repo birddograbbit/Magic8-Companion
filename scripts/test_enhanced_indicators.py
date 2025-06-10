@@ -7,6 +7,7 @@ Demonstrates the enhanced scoring system with all new indicators.
 import os
 import sys
 import json
+import asyncio
 from datetime import datetime
 
 # Add parent directory to path
@@ -16,7 +17,7 @@ from magic8_companion.modules.enhanced_combo_scorer import EnhancedComboScorer
 from magic8_companion.modules.market_analysis_simplified import MarketAnalyzer
 
 
-def test_enhanced_scoring():
+async def test_enhanced_scoring():
     """Test enhanced scoring with mock data."""
     print("="*60)
     print("Magic8-Companion Enhanced Indicators Test")
@@ -40,7 +41,16 @@ def test_enhanced_scoring():
     # Get mock market data
     print("\n" + "="*60)
     print("Fetching market data...")
-    market_data = analyzer.get_market_data('SPX')
+    market_data_raw = await analyzer.analyze_symbol('SPX')
+    
+    # Convert to the format expected by scorer
+    market_data = {
+        'iv_rank': market_data_raw['iv_percentile'],
+        'range_expectation': market_data_raw['expected_range_pct'],
+        'gamma_environment': market_data_raw['gamma_environment'],
+        'spot_price': 5850,  # Mock spot price
+        'time_to_expiry': 1/365  # 0DTE
+    }
     
     # Add mock option chain data for enhanced indicators
     market_data['option_chain'] = generate_mock_option_chain(market_data['spot_price'])
@@ -166,7 +176,7 @@ def generate_mock_option_chain(spot_price):
     return option_chain
 
 
-def save_test_results():
+async def save_test_results():
     """Save test results to file for documentation."""
     os.environ['ENABLE_GREEKS'] = 'true'
     os.environ['ENABLE_ADVANCED_GEX'] = 'true'
@@ -176,8 +186,16 @@ def save_test_results():
     scorer = EnhancedComboScorer()
     analyzer = MarketAnalyzer()
     
-    market_data = analyzer.get_market_data('SPX')
-    market_data['option_chain'] = generate_mock_option_chain(market_data['spot_price'])
+    # Get market data
+    market_data_raw = await analyzer.analyze_symbol('SPX')
+    market_data = {
+        'iv_rank': market_data_raw['iv_percentile'],
+        'range_expectation': market_data_raw['expected_range_pct'],
+        'gamma_environment': market_data_raw['gamma_environment'],
+        'spot_price': 5850,
+        'time_to_expiry': 1/365,
+        'option_chain': generate_mock_option_chain(5850)
+    }
     
     results = scorer.score_all_strategies(market_data)
     
@@ -209,16 +227,22 @@ def save_test_results():
     print(f"\nTest results saved to: {output_path}")
 
 
-if __name__ == "__main__":
+async def main():
+    """Main entry point for async execution."""
     # Run main test
-    test_enhanced_scoring()
+    await test_enhanced_scoring()
     
     # Save results
     print("\n" + "="*60)
-    save_test_results()
+    await save_test_results()
     
     print("\nEnhanced indicators test complete!")
     print("\nNext steps:")
     print("1. Review the score differences between enhanced and basic")
     print("2. Fine-tune adjustment weights based on backtesting")
     print("3. Test with real market data when ready")
+
+
+if __name__ == "__main__":
+    # Run the async main function
+    asyncio.run(main())
