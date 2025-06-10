@@ -10,7 +10,7 @@ asyncio
 pytz==2024.2
 
 # Logging
-colorlog==6.10.0
+colorlog==6.8.2
 
 # Market Data
 yfinance==0.2.50
