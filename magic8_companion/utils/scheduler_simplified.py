@@ -18,6 +18,7 @@ class SimpleScheduler:
         self.checkpoints = []
         self.running = False
         self.task = None
+        self.skip_past_checkpoints_on_startup = True  # New flag
         
     def add_checkpoint(self, time_str: str, callback: Callable):
         """Add a scheduled checkpoint."""
@@ -61,14 +62,18 @@ class SimpleScheduler:
     
     async def _schedule_loop(self):
         """Main scheduling loop."""
+        first_run = True
+        
         while self.running:
             try:
                 current_time = datetime.now(self.timezone)
                 
                 # Check each checkpoint
                 for checkpoint in self.checkpoints:
-                    if self._should_execute_checkpoint(checkpoint, current_time):
+                    if self._should_execute_checkpoint(checkpoint, current_time, first_run):
                         await self._execute_checkpoint(checkpoint, current_time)
+                
+                first_run = False  # After first iteration, allow past checkpoints
                 
                 # Sleep for 30 seconds before next check
                 await asyncio.sleep(30)
@@ -79,7 +84,7 @@ class SimpleScheduler:
                 logger.error(f"Error in scheduler loop: {e}")
                 await asyncio.sleep(60)  # Wait longer on error
     
-    def _should_execute_checkpoint(self, checkpoint: dict, current_time: datetime) -> bool:
+    def _should_execute_checkpoint(self, checkpoint: dict, current_time: datetime, first_run: bool) -> bool:
         """Check if checkpoint should be executed."""
         checkpoint_time = checkpoint["time"]
         last_executed = checkpoint["last_executed"]
@@ -91,6 +96,12 @@ class SimpleScheduler:
             second=0,
             microsecond=0
         )
+        
+        # On first run, skip checkpoints that have already passed today
+        if first_run and self.skip_past_checkpoints_on_startup:
+            if current_time > checkpoint_dt:
+                logger.info(f"Skipping past checkpoint {checkpoint['time_str']} on startup")
+                return False
         
         # Check if we're within execution window (current time >= checkpoint time)
         if current_time < checkpoint_dt:
