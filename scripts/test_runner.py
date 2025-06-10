@@ -222,26 +222,58 @@ class Magic8TestRunner:
                         print(f"Timestamp: {timestamp}")
                         print(f"Checkpoint: {checkpoint}")
                         
-                        for symbol, rec in recommendations.items():
-                            confidence = rec.get('confidence', 'Unknown')
-                            strategy = rec.get('preferred_strategy', 'Unknown')
-                            score = rec.get('score', 0)
+                        for symbol, rec_data in recommendations.items():
+                            print(f"\n{Colors.BOLD}{symbol}:{Colors.ENDC}")
                             
-                            # Color code by confidence
-                            if confidence == 'HIGH':
-                                color = Colors.GREEN
-                                status = "✅ WILL TRADE"
-                            elif confidence == 'MEDIUM':
-                                color = Colors.YELLOW
-                                status = "⚠️  SKIP (Not HIGH)"
+                            # Handle new multi-strategy format
+                            strategies = rec_data.get('strategies', {})
+                            best_strategy = rec_data.get('best_strategy', 'Unknown')
+                            
+                            if strategies:
+                                # New format with multiple strategies
+                                print(f"  Best Strategy: {best_strategy}")
+                                for strategy, details in strategies.items():
+                                    confidence = details.get('confidence', 'Unknown')
+                                    score = details.get('score', 0)
+                                    should_trade = details.get('should_trade', False)
+                                    
+                                    # Color code by confidence
+                                    if confidence == 'HIGH' and should_trade:
+                                        color = Colors.GREEN
+                                        status = "✅ WILL TRADE"
+                                    elif confidence == 'HIGH':
+                                        color = Colors.GREEN
+                                        status = "⚠️  HIGH but below threshold"
+                                    elif confidence == 'MEDIUM':
+                                        color = Colors.YELLOW
+                                        status = "⚠️  SKIP (Not HIGH)"
+                                    else:
+                                        color = Colors.RED
+                                        status = "❌ SKIP (Low confidence)"
+                                    
+                                    print(f"  {strategy}:")
+                                    print(f"    Score: {score}")
+                                    print(f"    {color}Confidence: {confidence} - {status}{Colors.ENDC}")
                             else:
-                                color = Colors.RED
-                                status = "❌ SKIP (Low confidence)"
-                            
-                            print(f"\n{symbol}:")
-                            print(f"  Strategy: {strategy}")
-                            print(f"  Score: {score}")
-                            print(f"  {color}Confidence: {confidence} - {status}{Colors.ENDC}")
+                                # Old format fallback
+                                confidence = rec_data.get('confidence', 'Unknown')
+                                strategy = rec_data.get('preferred_strategy', 'Unknown')
+                                score = rec_data.get('score', 0)
+                                
+                                # Color code by confidence
+                                if confidence == 'HIGH':
+                                    color = Colors.GREEN
+                                    status = "✅ WILL TRADE"
+                                elif confidence == 'MEDIUM':
+                                    color = Colors.YELLOW
+                                    status = "⚠️  SKIP (Not HIGH)"
+                                else:
+                                    color = Colors.RED
+                                    status = "❌ SKIP (Low confidence)"
+                                
+                                print(f"  Strategy: {strategy}")
+                                print(f"  Score: {score}")
+                                print(f"  {color}Confidence: {confidence} - {status}{Colors.ENDC}")
                 
                 # Check every 5 seconds
                 time.sleep(5)
