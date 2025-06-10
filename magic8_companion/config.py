@@ -33,6 +33,51 @@ class Settings(BaseSettings):
     # Time zone
     timezone: str = "America/New_York"
     
+    # Enhanced indicators
+    enable_greeks: bool = False
+    enable_advanced_gex: bool = False
+    enable_volume_analysis: bool = False
+    
+    # IBKR specific settings
+    use_ibkr_data: bool = False
+    ibkr_host: str = "127.0.0.1"
+    ibkr_port: int = 7497
+    ibkr_client_id: int = 1
+    ibkr_fallback_to_yahoo: bool = True
+    
+    # Logging settings
+    log_level: str = "INFO"
+    log_to_file: bool = True
+    log_file_path: str = "logs/magic8_companion.log"
+    log_file_max_size: int = 10485760
+    log_file_backup_count: int = 5
+    
+    # Performance settings
+    enable_caching: bool = True
+    cache_expiry_minutes: int = 5
+    enable_parallel_processing: bool = True
+    max_workers: int = 4
+    
+    # Email settings
+    smtp_port: int = 587
+    
+    # Greeks parameters
+    greeks_risk_free_rate: float = 0.053
+    greeks_dividend_yield: float = 0.012
+    
+    # GEX parameters
+    gex_0dte_multiplier: float = 8.0
+    gex_smoothing_window: int = 5
+    
+    # Volume analysis parameters
+    volume_anomaly_threshold: float = 2.5
+    volume_liquidity_min_oi: int = 100
+    
+    # Strategy thresholds
+    butterfly_iv_threshold: int = 40
+    iron_condor_iv_range: List[int] = [30, 80]
+    vertical_min_iv: int = 50
+    
     class Config:
         env_file = ".env"
         env_prefix = "M8C_"  # Magic8-Companion prefix
