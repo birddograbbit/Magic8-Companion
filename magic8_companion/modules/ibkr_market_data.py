@@ -9,7 +9,7 @@ import asyncio
 from typing import Dict, List, Optional, Union
 from datetime import datetime, timedelta
 import numpy as np
-from ib_insync import IB, Stock, Option, Contract, util
+from ib_async import IB, Stock, Option, Contract, util
 import os
 
 logger = logging.getLogger(__name__)
