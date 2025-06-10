@@ -24,6 +24,9 @@ class EnhancedComboScorer(ComboScorer):
         """Initialize enhanced scorer with optional components."""
         super().__init__()
         
+        # Define the strategies we support
+        self.strategies = ["Butterfly", "Iron_Condor", "Vertical"]
+        
         # Check if enhancements are enabled
         self.enable_greeks = os.getenv('ENABLE_GREEKS', 'false').lower() == 'true'
         self.enable_advanced_gex = os.getenv('ENABLE_ADVANCED_GEX', 'false').lower() == 'true'
@@ -42,81 +45,62 @@ class EnhancedComboScorer(ComboScorer):
             self.volume_wrapper = VolumeOIWrapper()
             logger.info("Volume/OI analysis enabled")
     
-    def calculate_strategy_score(
-        self,
-        strategy_type: str,
-        market_conditions: Dict
-    ) -> Dict:
+    def score_combo_types(self, market_data: Dict, symbol: str) -> Dict[str, float]:
         """
-        Calculate enhanced strategy score with optional indicators.
-        
-        Fully backward compatible - works with original 3 indicators only.
+        Override to add enhanced scoring while maintaining compatibility.
         """
-        # Get base score from parent class
-        base_result = super().calculate_strategy_score(strategy_type, market_conditions)
+        # Get base scores from parent class
+        base_scores = super().score_combo_types(market_data, symbol)
         
-        # If no enhancements enabled, return base result
+        # If no enhancements enabled, return base scores
         if not any([self.enable_greeks, self.enable_advanced_gex, self.enable_volume_analysis]):
-            return base_result
+            return base_scores
         
-        # Start with base score
-        enhanced_score = base_result['score']
-        score_components = {
-            'base_score': base_result['score'],
-            'base_components': base_result.get('components', {})
-        }
+        # Enhance scores with additional indicators
+        enhanced_scores = {}
+        for strategy in self.strategies:
+            # Start with base score
+            enhanced_score = base_scores.get(strategy, 0)
+            
+            # Add enhancements
+            market_conditions = {
+                'iv_percentile': market_data.get('iv_percentile', 50),
+                'range_pct': market_data.get('expected_range_pct', 0.01),
+                'gamma_env': market_data.get('gamma_environment', ''),
+                'spot_price': market_data.get('spot_price', 5850),
+                'time_to_expiry': market_data.get('time_to_expiry', 1/365),
+                'option_chain': market_data.get('option_chain', [])
+            }
+            
+            # Add Greeks adjustments if enabled
+            if self.enable_greeks and market_conditions['option_chain']:
+                try:
+                    greeks_adj = self._calculate_greeks_adjustments(strategy, market_conditions)
+                    enhanced_score += sum(greeks_adj.values())
+                except Exception as e:
+                    logger.warning(f"Greeks calculation failed for {strategy}: {e}")
+            
+            # Add advanced GEX adjustments if enabled
+            if self.enable_advanced_gex and market_conditions['option_chain']:
+                try:
+                    gex_adj = self._calculate_gex_adjustments(strategy, market_conditions)
+                    enhanced_score += sum(gex_adj.values())
+                except Exception as e:
+                    logger.warning(f"GEX calculation failed for {strategy}: {e}")
+            
+            # Add volume/OI adjustments if enabled
+            if self.enable_volume_analysis and market_conditions['option_chain']:
+                try:
+                    volume_adj = self._calculate_volume_adjustments(strategy, market_conditions)
+                    enhanced_score += sum(volume_adj.values())
+                except Exception as e:
+                    logger.warning(f"Volume analysis failed for {strategy}: {e}")
+            
+            # Ensure score stays in valid range
+            enhanced_scores[strategy] = max(0, min(100, enhanced_score))
         
-        # Add Greeks adjustments if enabled
-        if self.enable_greeks and 'option_chain' in market_conditions:
-            try:
-                greeks_adj = self._calculate_greeks_adjustments(
-                    strategy_type, market_conditions
-                )
-                enhanced_score += sum(greeks_adj.values())
-                score_components['greeks_adjustments'] = greeks_adj
-            except Exception as e:
-                logger.warning(f"Greeks calculation failed: {e}")
-        
-        # Add advanced GEX adjustments if enabled
-        if self.enable_advanced_gex and 'option_chain' in market_conditions:
-            try:
-                gex_adj = self._calculate_gex_adjustments(
-                    strategy_type, market_conditions
-                )
-                enhanced_score += sum(gex_adj.values())
-                score_components['gex_adjustments'] = gex_adj
-            except Exception as e:
-                logger.warning(f"GEX calculation failed: {e}")
-        
-        # Add volume/OI adjustments if enabled
-        if self.enable_volume_analysis and 'option_chain' in market_conditions:
-            try:
-                volume_adj = self._calculate_volume_adjustments(
-                    strategy_type, market_conditions
-                )
-                enhanced_score += sum(volume_adj.values())
-                score_components['volume_adjustments'] = volume_adj
-            except Exception as e:
-                logger.warning(f"Volume analysis failed: {e}")
-        
-        # Ensure score stays in valid range
-        enhanced_score = max(0, min(100, enhanced_score))
-        
-        # Determine confidence based on enhanced score
-        if enhanced_score >= 75:
-            confidence = "HIGH"
-        elif enhanced_score >= 50:
-            confidence = "MEDIUM"
-        else:
-            confidence = "LOW"
-        
-        return {
-            'score': enhanced_score,
-            'confidence': confidence,
-            'should_trade': enhanced_score >= self.min_score,
-            'components': score_components,
-            'enhanced': True
-        }
+        logger.debug(f"{symbol} enhanced scores: {enhanced_scores}")
+        return enhanced_scores
     
     def _calculate_greeks_adjustments(
         self,
@@ -199,19 +183,36 @@ class EnhancedComboScorer(ComboScorer):
     
     def score_all_strategies(
         self,
-        market_conditions: Dict
+        market_data: Dict
     ) -> Dict[str, Dict]:
         """
         Score all strategies with enhanced indicators.
         
-        Maintains same output format as base class.
+        Uses the same approach as the base class but returns enhanced scores.
         """
-        results = {}
+        # Get symbol from market data or use default
+        symbol = market_data.get('symbol', 'SPX')
         
-        for strategy in self.strategy_weights.keys():
-            results[strategy] = self.calculate_strategy_score(
-                strategy, market_conditions
-            )
+        # Get enhanced scores using our overridden method
+        scores = self.score_combo_types(market_data, symbol)
+        
+        # Convert to detailed results format
+        results = {}
+        for strategy, score in scores.items():
+            # Determine confidence based on score
+            if score >= 75:
+                confidence = "HIGH"
+            elif score >= 50:
+                confidence = "MEDIUM"
+            else:
+                confidence = "LOW"
+            
+            results[strategy] = {
+                'score': score,
+                'confidence': confidence,
+                'should_trade': score >= 50,  # Assuming 50 as minimum trade threshold
+                'enhanced': True
+            }
         
         return results
     
@@ -238,8 +239,8 @@ if __name__ == "__main__":
     
     # Mock market conditions with option chain
     market_conditions = {
-        'iv_rank': 45,
-        'range_expectation': 0.015,
+        'iv_percentile': 45,
+        'expected_range_pct': 0.015,
         'gamma_environment': 'Neutral',
         'spot_price': 5850,
         'time_to_expiry': 1/365,
@@ -288,5 +289,3 @@ if __name__ == "__main__":
         print(f"  Score: {result['score']:.1f}")
         print(f"  Confidence: {result['confidence']}")
         print(f"  Should Trade: {result['should_trade']}")
-        if 'components' in result:
-            print(f"  Components: {result['components']}")
