@@ -8,7 +8,7 @@ import os
 import sys
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,8 +45,8 @@ async def test_enhanced_scoring():
     
     # Convert to the format expected by scorer
     market_data = {
-        'iv_rank': market_data_raw['iv_percentile'],
-        'range_expectation': market_data_raw['expected_range_pct'],
+        'iv_percentile': market_data_raw['iv_percentile'],
+        'expected_range_pct': market_data_raw['expected_range_pct'],
         'gamma_environment': market_data_raw['gamma_environment'],
         'spot_price': 5850,  # Mock spot price
         'time_to_expiry': 1/365  # 0DTE
@@ -57,8 +57,8 @@ async def test_enhanced_scoring():
     
     print(f"\nMarket Conditions:")
     print(f"  Spot Price: ${market_data['spot_price']:,.2f}")
-    print(f"  IV Rank: {market_data['iv_rank']}")
-    print(f"  Expected Range: {market_data['range_expectation']:.2%}")
+    print(f"  IV Percentile: {market_data['iv_percentile']}")
+    print(f"  Expected Range: {market_data['expected_range_pct']:.2%}")
     print(f"  Option Chain: {len(market_data['option_chain'])} strikes")
     
     # Score all strategies
@@ -189,8 +189,8 @@ async def save_test_results():
     # Get market data
     market_data_raw = await analyzer.analyze_symbol('SPX')
     market_data = {
-        'iv_rank': market_data_raw['iv_percentile'],
-        'range_expectation': market_data_raw['expected_range_pct'],
+        'iv_percentile': market_data_raw['iv_percentile'],
+        'expected_range_pct': market_data_raw['expected_range_pct'],
         'gamma_environment': market_data_raw['gamma_environment'],
         'spot_price': 5850,
         'time_to_expiry': 1/365,
@@ -201,7 +201,7 @@ async def save_test_results():
     
     # Create enhanced recommendation format
     recommendation = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         "checkpoint_time": datetime.now().strftime("%H:%M ET"),
         "enhanced_indicators": True,
         "recommendations": {
@@ -209,8 +209,8 @@ async def save_test_results():
                 "strategies": results,
                 "best_strategy": max(results.items(), key=lambda x: x[1]['score'])[0],
                 "market_conditions": {
-                    "iv_rank": market_data['iv_rank'],
-                    "range_expectation": market_data['range_expectation'],
+                    "iv_percentile": market_data['iv_percentile'],
+                    "expected_range_pct": market_data['expected_range_pct'],
                     "gamma_environment": market_data['gamma_environment'],
                     "spot_price": market_data['spot_price'],
                     "enhancements_enabled": scorer.get_enhancement_status()
