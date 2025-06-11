@@ -175,5 +175,27 @@ class ComboScorer:
         # High IV bonus for premium collection
         if iv_percentile > 80 and range_pct > 0.012:
             score += 10  # Excellent vertical conditions
-        
+
         return min(score, 100)
+
+
+def generate_recommendation(scores: Dict[str, float]) -> Dict[str, str | float]:
+    """Generate combo type recommendation based on score thresholds."""
+    from magic8_companion.config import settings
+
+    if not scores:
+        return {"recommendation": "NONE", "reason": "No scores provided"}
+
+    best_combo = max(scores, key=scores.get)
+    best_score = scores[best_combo]
+
+    if best_score >= settings.min_recommendation_score:
+        second_best = sorted(scores.values())[-2] if len(scores) > 1 else 0
+        if best_score - second_best >= settings.min_score_gap:
+            return {
+                "recommendation": best_combo,
+                "score": best_score,
+                "confidence": "HIGH" if best_score >= 85 else "MEDIUM",
+            }
+
+    return {"recommendation": "NONE", "reason": "No clear favorite"}
