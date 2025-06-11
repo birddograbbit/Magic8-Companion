@@ -6,6 +6,7 @@ Provides real-time data with accurate Greeks calculations.
 
 import logging
 import asyncio
+import math  # Added for NaN handling
 from typing import Dict, List, Optional, Union
 from datetime import datetime, timedelta
 import numpy as np
@@ -285,10 +286,25 @@ class IBKRMarketData:
                 call_greeks = call_ticker.modelGreeks or {}
                 put_greeks = put_ticker.modelGreeks or {}
                 
-                # Get open interest - it's stored in callOpenInterest/putOpenInterest
-                # not in a generic openInterest attribute
-                call_oi = int(call_ticker.callOpenInterest or 0) if hasattr(call_ticker, 'callOpenInterest') else 0
-                put_oi = int(put_ticker.putOpenInterest or 0) if hasattr(put_ticker, 'putOpenInterest') else 0
+                # Get open interest - handle NaN values properly
+                # IBKR can return NaN for open interest, especially when market is closed
+                call_oi = 0
+                if hasattr(call_ticker, 'callOpenInterest') and call_ticker.callOpenInterest is not None:
+                    try:
+                        # Check for NaN before converting
+                        if not math.isnan(call_ticker.callOpenInterest):
+                            call_oi = int(call_ticker.callOpenInterest)
+                    except (TypeError, ValueError):
+                        pass
+                
+                put_oi = 0
+                if hasattr(put_ticker, 'putOpenInterest') and put_ticker.putOpenInterest is not None:
+                    try:
+                        # Check for NaN before converting
+                        if not math.isnan(put_ticker.putOpenInterest):
+                            put_oi = int(put_ticker.putOpenInterest)
+                    except (TypeError, ValueError):
+                        pass
                 
                 # Only add if we have valid data
                 if call_ticker.marketPrice() is not None and put_ticker.marketPrice() is not None:
