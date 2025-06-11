@@ -95,10 +95,10 @@ All enhancements are configurable and can be disabled:
 
 ```python
 # .env
-ENABLE_GREEKS=true
-ENABLE_ADVANCED_GEX=true
-ENABLE_VOLUME_ANALYSIS=true
-USE_MOCK_DATA=true  # Test with mock data first
+M8C_ENABLE_GREEKS=true
+M8C_ENABLE_ADVANCED_GEX=true
+M8C_ENABLE_VOLUME_ANALYSIS=true
+M8C_USE_MOCK_DATA=true  # Test with mock data first
 ```
 
 ## Testing Strategy

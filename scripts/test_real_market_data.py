@@ -34,10 +34,10 @@ async def test_real_market_data(symbols: list = None):
     print("="*60)
     
     # Enable all enhancements and real data
-    os.environ['ENABLE_GREEKS'] = 'true'
-    os.environ['ENABLE_ADVANCED_GEX'] = 'true'
-    os.environ['ENABLE_VOLUME_ANALYSIS'] = 'true'
-    os.environ['USE_MOCK_DATA'] = 'false'  # Use real data
+    os.environ['M8C_ENABLE_GREEKS'] = 'true'
+    os.environ['M8C_ENABLE_ADVANCED_GEX'] = 'true'
+    os.environ['M8C_ENABLE_VOLUME_ANALYSIS'] = 'true'
+    os.environ['M8C_USE_MOCK_DATA'] = 'false'  # Use real data
     
     # Initialize components
     scorer = EnhancedComboScorer()

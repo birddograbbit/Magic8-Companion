@@ -24,10 +24,10 @@ async def test_enhanced_scoring():
     print("="*60)
     
     # Enable all enhancements
-    os.environ['ENABLE_GREEKS'] = 'true'
-    os.environ['ENABLE_ADVANCED_GEX'] = 'true'
-    os.environ['ENABLE_VOLUME_ANALYSIS'] = 'true'
-    os.environ['USE_MOCK_DATA'] = 'true'
+    os.environ['M8C_ENABLE_GREEKS'] = 'true'
+    os.environ['M8C_ENABLE_ADVANCED_GEX'] = 'true'
+    os.environ['M8C_ENABLE_VOLUME_ANALYSIS'] = 'true'
+    os.environ['M8C_USE_MOCK_DATA'] = 'true'
     
     # Initialize components
     scorer = EnhancedComboScorer()
@@ -109,9 +109,9 @@ async def test_enhanced_scoring():
     
     # Test with enhancements disabled
     print("\n\nTesting with enhancements disabled...")
-    os.environ['ENABLE_GREEKS'] = 'false'
-    os.environ['ENABLE_ADVANCED_GEX'] = 'false'
-    os.environ['ENABLE_VOLUME_ANALYSIS'] = 'false'
+    os.environ['M8C_ENABLE_GREEKS'] = 'false'
+    os.environ['M8C_ENABLE_ADVANCED_GEX'] = 'false'
+    os.environ['M8C_ENABLE_VOLUME_ANALYSIS'] = 'false'
     
     scorer_basic = EnhancedComboScorer()
     results_basic = scorer_basic.score_all_strategies(market_data)
@@ -178,10 +178,10 @@ def generate_mock_option_chain(spot_price):
 
 async def save_test_results():
     """Save test results to file for documentation."""
-    os.environ['ENABLE_GREEKS'] = 'true'
-    os.environ['ENABLE_ADVANCED_GEX'] = 'true'
-    os.environ['ENABLE_VOLUME_ANALYSIS'] = 'true'
-    os.environ['USE_MOCK_DATA'] = 'true'
+    os.environ['M8C_ENABLE_GREEKS'] = 'true'
+    os.environ['M8C_ENABLE_ADVANCED_GEX'] = 'true'
+    os.environ['M8C_ENABLE_VOLUME_ANALYSIS'] = 'true'
+    os.environ['M8C_USE_MOCK_DATA'] = 'true'
     
     scorer = EnhancedComboScorer()
     analyzer = MarketAnalyzer()

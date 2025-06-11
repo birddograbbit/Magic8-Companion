@@ -136,12 +136,12 @@ Results are saved with timestamps:
 Control the behavior with these settings:
 ```bash
 # Enable/disable enhancements
-export ENABLE_GREEKS=true
-export ENABLE_ADVANCED_GEX=true  
-export ENABLE_VOLUME_ANALYSIS=true
+export M8C_ENABLE_GREEKS=true
+export M8C_ENABLE_ADVANCED_GEX=true
+export M8C_ENABLE_VOLUME_ANALYSIS=true
 
 # Force real data (no mock)
-export USE_MOCK_DATA=false
+export M8C_USE_MOCK_DATA=false
 ```
 
 ## Next Steps
