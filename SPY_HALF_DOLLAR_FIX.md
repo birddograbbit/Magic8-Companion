@@ -84,3 +84,12 @@ the sequence is `SMART`, `CBOE`, `AMEX`, then `ISE`.  The logs show which
 exchange ultimately succeeds so we can track where half-dollar strikes are
 available.  This fallback removes the `No security definition` warnings during
 testing.
+
+### June 13 Update
+
+With exchange fallback working, half-dollar SPY strikes still generated extra requests that ultimately failed qualification. After obtaining the strike list from the option chain we now remove any values that are not whole dollars:
+```python
+if original_symbol == 'SPY':
+    all_strikes = [s for s in all_strikes if s.is_integer()]
+```
+This ensures only strikes that IBKR can qualify are requested. Logs show the filtered strike range so it's clear which strikes were kept.

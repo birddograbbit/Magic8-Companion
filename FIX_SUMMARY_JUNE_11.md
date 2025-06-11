@@ -45,6 +45,7 @@ else:
 
 ### SPY: ✅ Working
 - All strikes including half-dollar qualify using exchange fallback
+- Whole-dollar filtering applied so only valid strikes are requested
 - NaN warnings fixed
 
 ## Verification Commands
