@@ -68,9 +68,9 @@ Key configuration options:
 - `M8C_CHECKPOINT_TIMES`: Times to run analysis
 
 Enhanced indicator options:
-- `ENABLE_GREEKS`: Enable Greeks calculations (Delta, Theta, Vega)
-- `ENABLE_ADVANCED_GEX`: Enable advanced Gamma Exposure analysis
-- `ENABLE_VOLUME_ANALYSIS`: Enable Volume/OI sentiment analysis
+- `M8C_ENABLE_GREEKS`: Enable Greeks calculations (Delta, Theta, Vega)
+- `M8C_ENABLE_ADVANCED_GEX`: Enable advanced Gamma Exposure analysis
+- `M8C_ENABLE_VOLUME_ANALYSIS`: Enable Volume/OI sentiment analysis
 
 ### 4. Test
 
