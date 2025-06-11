@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-06-10T20:06:28.821778Z",
+  "checkpoint_time": "22:06 ET",
+  "enhanced_indicators": true,
+  "recommendations": {
+    "SPX": {
+      "strategies": {
+        "Butterfly": {
+          "score": 100,
+          "confidence": "HIGH",
+          "should_trade": true,
+          "enhanced": true
+        },
+        "Iron_Condor": {
+          "score": 45.0,
+          "confidence": "LOW",
+          "should_trade": false,
+          "enhanced": true
+        },
+        "Vertical": {
+          "score": 20.0,
+          "confidence": "LOW",
+          "should_trade": false,
+          "enhanced": true
+        }
+      },
+      "best_strategy": "Butterfly",
+      "market_conditions": {
+        "iv_percentile": 20.3,
+        "expected_range_pct": 0.0038,
+        "gamma_environment": "Low volatility, high gamma",
+        "spot_price": 5850,
+        "enhancements_enabled": {
+          "greeks_enabled": true,
+          "advanced_gex_enabled": true,
+          "volume_analysis_enabled": true
+        }
+      }
+    }
+  }
+}

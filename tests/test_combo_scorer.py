@@ -1,42 +1,48 @@
 import pytest
-from magic8_companion.modules.combo_scorer import score_combo_types, generate_recommendation
+from magic8_companion.modules.combo_scorer import ComboScorer, generate_recommendation
 
 # Test cases for score_combo_types
-# Each tuple: (magic8_data, market_data, expected_butterfly_score_range, expected_condor_score_range, expected_vertical_score_range)
-# Ranges are used because exact scores might be subject to minor logic tweaks not affecting overall preference.
+# Each tuple: (market_data, expected_scores)
 score_test_cases = [
-    # Case 1: Butterfly favorable (pinning, tight range, weak trend, high IV, near GEX flip)
     (
-        {'spot_price': 5000, 'strength': 0.4, 'range': 10, 'levels': {'center': 5000, 'gamma': 5000}},
-        {'iv_percentile': 70, 'gex_flip': 5000, 'spread_avg': 1.0},
-        (80, 100), (0, 70), (0, 50) # Expect Butterfly to be highest
+        {
+            'iv_percentile': 18,
+            'expected_range_pct': 0.003,
+            'gamma_environment': 'High Gamma Pinning'
+        },
+        {'Butterfly': 100, 'Iron_Condor': 30, 'Vertical': 5}
     ),
-    # Case 2: Iron Condor favorable (range-bound, neutral trend, mod+ IV, reasonable GEX)
     (
-        {'spot_price': 5000, 'strength': 0.5, 'range': 20, 'levels': {'center': 5020, 'gamma': 5010}}, # Spot away from center
-        {'iv_percentile': 50, 'gex_flip': 5010, 'spread_avg': 1.5},
-        (0, 60), (70, 100), (0, 60) # Expect Condor to be highest
+        {
+            'iv_percentile': 50,
+            'expected_range_pct': 0.009,
+            'gamma_environment': 'Range-bound Moderate'
+        },
+        {'Butterfly': 0, 'Iron_Condor': 90, 'Vertical': 35}
     ),
-    # Case 3: Vertical favorable (strong trend, wider range, sufficient IV, away from GEX)
     (
-        {'spot_price': 5000, 'strength': 0.8, 'range': 30, 'levels': {'center': 5000, 'gamma': 4900}}, # GEX flip far
-        {'iv_percentile': 40, 'gex_flip': 4900, 'spread_avg': 2.0},
-        (0, 40), (0, 50), (70, 100) # Expect Vertical to be highest
+        {
+            'iv_percentile': 90,
+            'expected_range_pct': 0.02,
+            'gamma_environment': 'Directional High Volatility'
+        },
+        {'Butterfly': 0, 'Iron_Condor': 0, 'Vertical': 100}
     ),
-    # Case 4: Low scores, no clear favorite
     (
-        {'spot_price': 5000, 'strength': 0.1, 'range': 50, 'levels': {'center': 5200, 'gamma': 5300}},
-        {'iv_percentile': 10, 'gex_flip': 5300, 'spread_avg': 5.0},
-        (0, 30), (0, 30), (0, 30)
+        {
+            'iv_percentile': 25,
+            'expected_range_pct': 0.02,
+            'gamma_environment': 'Quiet market'
+        },
+        {'Butterfly': 25, 'Iron_Condor': 10, 'Vertical': 35}
     ),
 ]
 
-@pytest.mark.parametrize("magic8_data, market_data, bf_range, ic_range, v_range", score_test_cases)
-def test_score_combo_types_detailed(magic8_data, market_data, bf_range, ic_range, v_range):
-    scores = score_combo_types(magic8_data, market_data)
-    assert bf_range[0] <= scores['butterfly'] <= bf_range[1]
-    assert ic_range[0] <= scores['iron_condor'] <= ic_range[1]
-    assert v_range[0] <= scores['vertical'] <= v_range[1]
+@pytest.mark.parametrize("market_data, expected_scores", score_test_cases)
+def test_score_combo_types_detailed(market_data, expected_scores):
+    scorer = ComboScorer()
+    scores = scorer.score_combo_types(market_data, "TEST")
+    assert scores == expected_scores
 
 # Test cases for generate_recommendation
 # Each tuple: (scores, expected_recommendation, expected_confidence_or_none)
@@ -44,13 +50,9 @@ recommendation_test_cases = [
     ({'butterfly': 85, 'iron_condor': 60, 'vertical': 50}, 'butterfly', 'HIGH'),
     ({'butterfly': 75, 'iron_condor': 50, 'vertical': 40}, 'butterfly', 'MEDIUM'),
     ({'butterfly': 60, 'iron_condor': 80, 'vertical': 55}, 'iron_condor', 'MEDIUM'), # Score 80, diff 20
-    ({'butterfly': 60, 'iron_condor': 70, 'vertical': 45}, 'iron_condor', 'MEDIUM'), # Score 70, diff 10 -> but min_score_gap is 15
-    ({'butterfly': 90, 'iron_condor': 74, 'vertical': 70}, 'NONE', None), # Best score 90, but 90-74=16 (oops, this should recommend BF if gap is >=15)
-                                                                            # Let's re-check logic for generate_recommendation.
-                                                                            # It requires best_score >= 70 AND best_score - second_best >= 15.
-                                                                            # So, 90 is >=70. 90-74 = 16, which is >= 15. So it SHOULD recommend 'butterfly'.
-    ({'butterfly': 90, 'iron_condor': 76, 'vertical': 70}, 'butterfly', 'HIGH'), # 90-76=14. This should be NONE. Let's correct this test case.
-    ({'butterfly': 90, 'iron_condor': 76, 'vertical': 70}, 'NONE', None), # Corrected: 90-76=14 < 15
+    ({'butterfly': 60, 'iron_condor': 70, 'vertical': 45}, 'NONE', None),
+    ({'butterfly': 90, 'iron_condor': 74, 'vertical': 70}, 'butterfly', 'HIGH'),
+    ({'butterfly': 90, 'iron_condor': 76, 'vertical': 70}, 'NONE', None),
     ({'butterfly': 85, 'iron_condor': 70, 'vertical': 65}, 'butterfly', 'HIGH'), # 85-70=15. Should recommend.
 
     ({'butterfly': 65, 'iron_condor': 60, 'vertical': 50}, 'NONE', None), # Best score < 70
@@ -72,10 +74,12 @@ def test_generate_recommendation_detailed(scores, expected_rec, expected_conf):
 
 # Original basic test (can keep or remove)
 def test_generate_recommendation_basic_return_type():
-    magic8 = {
-        'spot_price': 5000, 'strength': 0.5, 'range': 10, 'levels': {'center': 5000, 'gamma': 5000}
+    market = {
+        'iv_percentile': 60,
+        'expected_range_pct': 0.009,
+        'gamma_environment': 'Range-bound moderate'
     }
-    market = {'iv_percentile': 60, 'gex_flip': 5000, 'spread_avg': 1}
-    scores = score_combo_types(magic8, market)
+    scorer = ComboScorer()
+    scores = scorer.score_combo_types(market, "TEST")
     rec = generate_recommendation(scores)
     assert 'recommendation' in rec
