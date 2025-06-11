@@ -5,6 +5,7 @@ Ship-fast approach: Simple, reliable, no authentication required.
 """
 
 import yfinance as yf
+import asyncio
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
@@ -36,10 +37,12 @@ class RealMarketData:
             # Map symbol to yfinance ticker
             yf_symbol = self.symbol_map.get(symbol, symbol)
             ticker = yf.Ticker(yf_symbol)
-            
+
             # Get current price
-            info = ticker.info
-            history = ticker.history(period="1d", interval="1m")
+            info = await asyncio.to_thread(lambda: ticker.info)
+            history = await asyncio.to_thread(
+                ticker.history, period="1d", interval="1m"
+            )
             
             if history.empty:
                 logger.error(f"No price data available for {symbol}")
@@ -48,7 +51,9 @@ class RealMarketData:
             current_price = float(history['Close'].iloc[-1])
             
             # Get options data
-            option_chain_data = self._get_option_chain(ticker, current_price)
+            option_chain_data = await asyncio.to_thread(
+                self._get_option_chain, ticker, current_price
+            )
             
             if not option_chain_data:
                 logger.error(f"No option chain data available for {symbol}")
