@@ -110,6 +110,7 @@ class IBKRMarketData:
                 logger.error(f"Failed to qualify contract for {symbol}")
                 return None
             underlying = contracts[0]
+            logger.debug(f"Qualified {symbol}: conId={underlying.conId}")
             
             # Get current price
             ticker = await self.ib.reqTickersAsync(underlying)
@@ -162,50 +163,27 @@ class IBKRMarketData:
         try:
             chains = []
             
-            # Special handling for SPX
-            if original_symbol == 'SPX':
-                # Try SPXW first (weekly options are more liquid)
-                try:
-                    logger.info("Attempting to fetch SPXW option chain...")
-                    chains = await self.ib.reqSecDefOptParamsAsync(
-                        'SPXW',
-                        '',  # Let IBKR determine the exchange
-                        underlying.secType,
-                        underlying.conId
-                    )
-                    if chains:
-                        logger.info(f"Successfully retrieved SPXW option chain with {len(chains)} chains")
-                except Exception as e:
-                    logger.warning(f"Failed to fetch SPXW options: {e}")
-                
-                # If SPXW fails, try regular SPX
-                if not chains:
-                    logger.info("Attempting to fetch SPX option chain...")
-                    chains = await self.ib.reqSecDefOptParamsAsync(
-                        'SPX',
-                        'CBOE',
-                        underlying.secType,
-                        underlying.conId
-                    )
-                    if chains:
-                        logger.info(f"Successfully retrieved SPX option chain with {len(chains)} chains")
-            else:
-                # Regular handling for other symbols
-                chains = await self.ib.reqSecDefOptParamsAsync(
-                    underlying.symbol,
-                    underlying.exchange,
-                    underlying.secType,
-                    underlying.conId
-                )
+            # Use the contract's actual conId instead of passing separately
+            logger.info(f"Fetching option chains for {original_symbol} (conId={underlying.conId})")
+            
+            # For all symbols, use the standard approach with the actual contract
+            chains = await self.ib.reqSecDefOptParamsAsync(
+                underlyingSymbol=underlying.symbol,
+                futFopExchange='',  # Empty string for all exchanges
+                underlyingSecType=underlying.secType,
+                underlyingConId=underlying.conId  # Use the actual conId
+            )
             
             if not chains:
                 logger.warning(f"No option chains found for {original_symbol}")
                 return []
             
             # Log chain details for debugging
+            logger.info(f"Found {len(chains)} option chain(s) for {original_symbol}")
             for i, chain in enumerate(chains):
-                logger.debug(f"Chain {i}: Exchange={chain.exchange}, Multiplier={chain.multiplier}, "
-                           f"Expirations={len(chain.expirations)}, Strikes={len(chain.strikes)}")
+                logger.debug(f"Chain {i}: Exchange={chain.exchange}, TradingClass={chain.tradingClass}, "
+                           f"Multiplier={chain.multiplier}, Expirations={len(chain.expirations)}, "
+                           f"Strikes={len(chain.strikes)}")
             
             # Find nearest expiration (0DTE or next available)
             today = datetime.now().date()
@@ -224,7 +202,7 @@ class IBKRMarketData:
             expirations.sort(key=lambda x: x[1])
             nearest_exp, exp_date, selected_chain = expirations[0]
             
-            logger.info(f"Selected expiration: {nearest_exp} ({exp_date})")
+            logger.info(f"Selected expiration: {nearest_exp} ({exp_date}) on {selected_chain.exchange}")
             
             # Calculate time to expiry
             days_to_exp = max(0.25, (exp_date - today).days)  # Min 0.25 for 0DTE
@@ -249,8 +227,9 @@ class IBKRMarketData:
             
             option_data = []
             
-            # Determine the correct symbol for option contracts
-            option_symbol = 'SPXW' if original_symbol == 'SPX' and chains[0].tradingClass == 'SPXW' else underlying.symbol
+            # Use the symbol from the underlying contract
+            # For SPX, the options will have tradingClass='SPXW' but symbol='SPX'
+            option_symbol = underlying.symbol
             
             # Fetch Greeks for each strike
             for strike in strikes:
@@ -273,6 +252,11 @@ class IBKRMarketData:
                     currency='USD'
                 )
                 
+                # Set trading class if it's different from symbol (e.g., SPXW for SPX)
+                if hasattr(selected_chain, 'tradingClass') and selected_chain.tradingClass:
+                    call.tradingClass = selected_chain.tradingClass
+                    put.tradingClass = selected_chain.tradingClass
+                
                 # Qualify contracts
                 try:
                     qualified_call = await self.ib.qualifyContractsAsync(call)
@@ -284,6 +268,8 @@ class IBKRMarketData:
                         
                     call = qualified_call[0]
                     put = qualified_put[0]
+                    
+                    logger.debug(f"Qualified {strike} call: {call.localSymbol}, tradingClass={call.tradingClass}")
                 except Exception as e:
                     logger.warning(f"Error qualifying contracts for strike {strike}: {e}")
                     continue
@@ -293,7 +279,7 @@ class IBKRMarketData:
                 put_ticker = self.ib.reqMktData(put, '', True, False)
                 
                 # Wait for data
-                await asyncio.sleep(1.5)  # Give more time for Greeks to populate
+                await asyncio.sleep(2.0)  # Give more time for Greeks to populate
                 
                 # Extract Greeks and market data
                 call_greeks = call_ticker.modelGreeks or {}
