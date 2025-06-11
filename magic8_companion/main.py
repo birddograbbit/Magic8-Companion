@@ -68,12 +68,12 @@ class RecommendationEngine:
                 # Score combo types
                 scores = self.combo_scorer.score_combo_types(market_data, symbol)
                 
-                # Determine best recommendation
-                recommendation = self._build_recommendation(scores, market_data, symbol)
+                # Build recommendations for ALL strategies
+                recommendation = self._build_all_recommendations(scores, market_data, symbol)
                 
                 if recommendation:
                     recommendations[symbol] = recommendation
-                    logger.info(f"{symbol}: {recommendation['preferred_strategy']} (Score: {recommendation['score']})")
+                    logger.info(f"{symbol}: Generated recommendations for all strategies")
                 
             except Exception as e:
                 logger.error(f"Error generating recommendation for {symbol}: {e}")
@@ -84,42 +84,50 @@ class RecommendationEngine:
             "recommendations": recommendations
         }
     
-    def _build_recommendation(self, scores: Dict[str, float], market_data: Dict, symbol: str) -> Optional[Dict[str, Any]]:
-        """Build recommendation from combo scores."""
+    def _build_all_recommendations(self, scores: Dict[str, float], market_data: Dict, symbol: str) -> Optional[Dict[str, Any]]:
+        """Build recommendations for ALL strategies."""
         if not scores:
             return None
             
-        # Find best strategy
+        # Build recommendations for each strategy
+        strategies = {}
+        
+        for strategy, score in scores.items():
+            # Determine confidence for this strategy
+            confidence = self._determine_confidence(score)
+            
+            # Determine if this strategy should be traded
+            # Use HIGH confidence threshold for trading decision
+            should_trade = confidence == "HIGH"
+            
+            strategies[strategy] = {
+                "score": round(score, 1),
+                "confidence": confidence,
+                "should_trade": should_trade,
+                "rationale": self._build_rationale(strategy, market_data, score)
+            }
+        
+        # Find the best strategy for reference
         best_strategy = max(scores.keys(), key=lambda k: scores[k])
-        best_score = scores[best_strategy]
-        
-        # Only recommend if score meets threshold
-        if best_score < settings.min_recommendation_score:
-            logger.info(f"{symbol}: No clear recommendation (best score: {best_score})")
-            return None
-            
-        # Check confidence level
-        second_best_score = sorted(scores.values())[-2] if len(scores) > 1 else 0
-        score_gap = best_score - second_best_score
-        
-        if score_gap < settings.min_score_gap:
-            logger.info(f"{symbol}: Score gap too small ({score_gap})")
-            return None
-            
-        confidence = "HIGH" if best_score >= 85 else "MEDIUM"
         
         return {
-            "preferred_strategy": best_strategy,
-            "score": round(best_score, 1),
-            "confidence": confidence,
-            "all_scores": {k: round(v, 1) for k, v in scores.items()},
+            "strategies": strategies,
+            "best_strategy": best_strategy,
             "market_conditions": {
                 "iv_rank": market_data.get("iv_percentile", "N/A"),
                 "range_expectation": market_data.get("expected_range_pct", "N/A"),
                 "gamma_environment": market_data.get("gamma_environment", "N/A")
-            },
-            "rationale": self._build_rationale(best_strategy, market_data, best_score)
+            }
         }
+    
+    def _determine_confidence(self, score: float) -> str:
+        """Determine confidence level based on score."""
+        if score >= 85:
+            return "HIGH"
+        elif score >= 60:
+            return "MEDIUM"
+        else:
+            return "LOW"
     
     def _build_rationale(self, strategy: str, market_data: Dict, score: float) -> str:
         """Build human-readable rationale for recommendation."""
@@ -152,10 +160,13 @@ class RecommendationEngine:
             
             logger.info(f"Recommendations saved to {self.output_file}")
             
-            # Also log summary
+            # Log summary for all strategies
             if recommendations.get("recommendations"):
                 for symbol, rec in recommendations["recommendations"].items():
-                    logger.info(f"📊 {symbol}: {rec['preferred_strategy']} ({rec['confidence']} confidence)")
+                    logger.info(f"📊 {symbol} recommendations:")
+                    for strategy, details in rec["strategies"].items():
+                        status = "✅ TRADE" if details["should_trade"] else "⏭️  SKIP"
+                        logger.info(f"  {strategy}: {details['confidence']} ({details['score']}) - {status}")
             else:
                 logger.info("📊 No recommendations generated this checkpoint")
                 
@@ -198,7 +209,7 @@ class SimplifiedMagic8Companion:
             
             # Log summary
             rec_count = len(recommendations.get("recommendations", {}))
-            logger.info(f"✅ Checkpoint complete - {rec_count} recommendations generated")
+            logger.info(f"✅ Checkpoint complete - {rec_count} symbols analyzed")
             
         except Exception as e:
             logger.error(f"Error in checkpoint execution: {e}")
