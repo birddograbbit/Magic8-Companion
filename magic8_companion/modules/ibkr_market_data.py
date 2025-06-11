@@ -285,6 +285,11 @@ class IBKRMarketData:
                 call_greeks = call_ticker.modelGreeks or {}
                 put_greeks = put_ticker.modelGreeks or {}
                 
+                # Get open interest - it's stored in callOpenInterest/putOpenInterest
+                # not in a generic openInterest attribute
+                call_oi = int(call_ticker.callOpenInterest or 0) if hasattr(call_ticker, 'callOpenInterest') else 0
+                put_oi = int(put_ticker.putOpenInterest or 0) if hasattr(put_ticker, 'putOpenInterest') else 0
+                
                 # Only add if we have valid data
                 if call_ticker.marketPrice() is not None and put_ticker.marketPrice() is not None:
                     option_data.append({
@@ -301,8 +306,8 @@ class IBKRMarketData:
                         'put_theta': float(getattr(put_greeks, 'theta', 0.0)),
                         'call_vega': float(getattr(call_greeks, 'vega', 0.0)),
                         'put_vega': float(getattr(put_greeks, 'vega', 0.0)),
-                        'call_open_interest': int(call_ticker.openInterest or 0),
-                        'put_open_interest': int(put_ticker.openInterest or 0),
+                        'call_open_interest': call_oi,
+                        'put_open_interest': put_oi,
                         'call_volume': int(call_ticker.volume or 0),
                         'put_volume': int(put_ticker.volume or 0),
                         'call_bid': float(call_ticker.bid or 0),
@@ -447,6 +452,8 @@ if __name__ == "__main__":
                     print(f"  Call Gamma: {sample['call_gamma']:.6f}")
                     print(f"  Call Theta: {sample['call_theta']:.4f}")
                     print(f"  Call Vega: {sample['call_vega']:.4f}")
+                    print(f"  Call OI: {sample['call_open_interest']}")
+                    print(f"  Put OI: {sample['put_open_interest']}")
             else:
                 print("Failed to fetch data")
     
