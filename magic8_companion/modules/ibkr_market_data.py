@@ -249,6 +249,39 @@ class IBKRMarketData:
                         logger.debug(f"Error canceling market data: {e}")
         
         return oi_data
+
+    async def qualify_contract_with_fallback(self, contract: Contract, symbol: str) -> Optional[Contract]:
+        """Qualify contract with fallback to different exchanges."""
+        exchange_fallbacks = {
+            'SPY': ['SMART', 'CBOE', 'AMEX', 'ISE'],
+            'SPX': ['CBOE', 'SMART'],
+            'QQQ': ['SMART', 'NASDAQ'],
+            'IWM': ['SMART', 'ARCA'],
+            'RUT': ['RUSSELL', 'SMART']
+        }
+
+        fallback_exchanges = exchange_fallbacks.get(symbol, ['SMART'])
+        original_exchange = contract.exchange
+
+        for exchange in fallback_exchanges:
+            try:
+                contract.exchange = exchange
+                qualified = await self.ib.qualifyContractsAsync(contract)
+                if qualified and qualified[0].conId:
+                    if exchange != original_exchange:
+                        strike_desc = getattr(contract, 'strike', '?')
+                        right = getattr(contract, 'right', '')
+                        logger.info(
+                            f"Qualified {strike_desc} {right} on {exchange} (original {original_exchange})"
+                        )
+                    return qualified[0]
+            except Exception as e:
+                logger.debug(f"Failed to qualify on {exchange}: {e}")
+                continue
+
+        strike_desc = getattr(contract, 'strike', '?')
+        logger.warning(f"Failed to qualify {strike_desc} on any exchange")
+        return None
     
     async def _get_option_chain_with_greeks(
         self, underlying: Contract, spot_price: float, original_symbol: str
@@ -373,28 +406,22 @@ class IBKRMarketData:
                     call.tradingClass = selected_chain.tradingClass
                     put.tradingClass = selected_chain.tradingClass
                 
-                # Qualify contracts with better error handling
-                try:
-                    qualified_call = await self.ib.qualifyContractsAsync(call)
-                    if qualified_call and qualified_call[0].conId:
-                        call = qualified_call[0]
-                        all_contracts.append(call)
-                        contract_map[call.conId] = (strike, 'C')
-                    else:
-                        logger.warning(f"Failed to qualify call for strike {strike}")
-                except Exception as e:
-                    logger.warning(f"Error qualifying call for strike {strike}: {e}")
-                
-                try:
-                    qualified_put = await self.ib.qualifyContractsAsync(put)
-                    if qualified_put and qualified_put[0].conId:
-                        put = qualified_put[0]
-                        all_contracts.append(put)
-                        contract_map[put.conId] = (strike, 'P')
-                    else:
-                        logger.warning(f"Failed to qualify put for strike {strike}")
-                except Exception as e:
-                    logger.warning(f"Error qualifying put for strike {strike}: {e}")
+                # Qualify contracts with fallback logic
+                qualified_call = await self.qualify_contract_with_fallback(call, original_symbol)
+                if qualified_call:
+                    call = qualified_call
+                    all_contracts.append(call)
+                    contract_map[call.conId] = (strike, 'C')
+                else:
+                    logger.warning(f"Failed to qualify call for strike {strike}")
+
+                qualified_put = await self.qualify_contract_with_fallback(put, original_symbol)
+                if qualified_put:
+                    put = qualified_put
+                    all_contracts.append(put)
+                    contract_map[put.conId] = (strike, 'P')
+                else:
+                    logger.warning(f"Failed to qualify put for strike {strike}")
             
             logger.info(f"Successfully qualified {len(all_contracts)} option contracts")
             
