@@ -6,13 +6,32 @@ Provides real-time data with accurate Greeks calculations.
 
 import logging
 import asyncio
-from typing import Dict, List, Optional, Union
+import math  # Added for NaN handling
+from typing import Dict, List, Optional, Union, Tuple
 from datetime import datetime, timedelta
 import numpy as np
-from ib_async import IB, Stock, Option, Contract, Index, util
+from ib_async import IB, Stock, Option, Contract, Index, util, Ticker
 from magic8_companion.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Generic tick constants based on working script
+# These work with snapshots
+SNAPSHOT_GENERIC_TICKS = ",".join([
+    "106",  # option implied vol
+    "107",  # option delta
+    "108",  # option gamma
+    "109",  # option vega
+    "110",  # option theta
+    "13",   # last volume
+    "104",  # bid/ask sizes
+])
+
+# These require streaming
+OI_GENERIC_TICKS = ",".join([
+    "100",  # call OI
+    "101",  # put OI
+])
 
 
 class IBKRMarketData:
@@ -46,6 +65,9 @@ class IBKRMarketData:
             'IWM': 'SMART',
             'SPY': 'SMART'
         }
+        
+        # OI streaming configuration
+        self.oi_streaming_timeout = 2.0  # seconds to wait for OI data
     
     async def connect(self) -> bool:
         """Connect to TWS/IB Gateway."""
@@ -156,10 +178,67 @@ class IBKRMarketData:
                 return await yahoo_fetcher.get_market_data(symbol)
             return None
     
+    async def _get_oi_streaming(self, contracts: List[Contract]) -> Dict[int, int]:
+        """
+        Get Open Interest data using streaming approach.
+        Based on the working script's implementation.
+        Returns {conId: oi_value} mapping.
+        """
+        logger.debug(f"Getting OI data via streaming for {len(contracts)} contracts...")
+        oi_data = {}
+        streaming_tickers = []
+        
+        try:
+            # Start streaming requests for OI
+            for contract in contracts:
+                ticker = self.ib.reqMktData(
+                    contract, 
+                    genericTickList=OI_GENERIC_TICKS, 
+                    snapshot=False
+                )
+                streaming_tickers.append(ticker)
+            
+            # Wait for data to populate
+            await asyncio.sleep(self.oi_streaming_timeout)
+            
+            # Extract OI data
+            for ticker in streaming_tickers:
+                if ticker.contract and ticker.contract.conId:
+                    oi_value = 0
+                    
+                    # Extract OI based on option type
+                    if ticker.contract.right == "C":
+                        # Try callOpenInterest first, then general openInterest
+                        oi_value = getattr(ticker, 'callOpenInterest', 0) or getattr(ticker, 'openInterest', 0) or 0
+                    else:
+                        # Try putOpenInterest first, then general openInterest
+                        oi_value = getattr(ticker, 'putOpenInterest', 0) or getattr(ticker, 'openInterest', 0) or 0
+                    
+                    # Handle NaN values
+                    if oi_value and not math.isnan(oi_value):
+                        oi_data[ticker.contract.conId] = int(oi_value)
+            
+            logger.debug(f"Successfully retrieved OI data for {len(oi_data)} contracts")
+            
+        except Exception as e:
+            logger.warning(f"Error getting OI data via streaming: {e}")
+        finally:
+            # Cancel all streaming subscriptions
+            for ticker in streaming_tickers:
+                try:
+                    self.ib.cancelMktData(ticker.contract)
+                except:
+                    pass
+        
+        return oi_data
+    
     async def _get_option_chain_with_greeks(
         self, underlying: Contract, spot_price: float, original_symbol: str
     ) -> List[Dict]:
-        """Fetch option chain with real Greeks from IBKR."""
+        """
+        Fetch option chain with real Greeks from IBKR.
+        Uses two-phase approach: snapshot for prices/Greeks, streaming for OI.
+        """
         try:
             chains = []
             
@@ -225,13 +304,14 @@ class IBKRMarketData:
             
             logger.info(f"Selected {len(strikes)} strikes near {spot_price}")
             
-            option_data = []
+            # Build list of all option contracts for OI streaming
+            all_contracts = []
+            contract_map = {}  # Map conId to (strike, right)
             
             # Use the symbol from the underlying contract
-            # For SPX, the options will have tradingClass='SPXW' but symbol='SPX'
             option_symbol = underlying.symbol
             
-            # Fetch Greeks for each strike
+            # First, create and qualify all contracts
             for strike in strikes:
                 # Create call and put contracts
                 call = Option(
@@ -262,71 +342,113 @@ class IBKRMarketData:
                     qualified_call = await self.ib.qualifyContractsAsync(call)
                     qualified_put = await self.ib.qualifyContractsAsync(put)
                     
-                    if not qualified_call or not qualified_put:
-                        logger.warning(f"Failed to qualify contracts for strike {strike}")
-                        continue
-                        
-                    call = qualified_call[0]
-                    put = qualified_put[0]
-                    
-                    logger.debug(f"Qualified {strike} call: {call.localSymbol}, tradingClass={call.tradingClass}")
+                    if qualified_call and qualified_put:
+                        call = qualified_call[0]
+                        put = qualified_put[0]
+                        all_contracts.extend([call, put])
+                        contract_map[call.conId] = (strike, 'C')
+                        contract_map[put.conId] = (strike, 'P')
                 except Exception as e:
                     logger.warning(f"Error qualifying contracts for strike {strike}: {e}")
                     continue
-                
-                # Request market data with Greeks (use snapshot)
-                call_ticker = self.ib.reqMktData(call, '', True, False)
-                put_ticker = self.ib.reqMktData(put, '', True, False)
-                
-                # Wait for data
-                await asyncio.sleep(2.0)  # Give more time for Greeks to populate
-                
-                # Extract Greeks and market data
-                call_greeks = call_ticker.modelGreeks or {}
-                put_greeks = put_ticker.modelGreeks or {}
-                
-                # Get open interest - it's stored in callOpenInterest/putOpenInterest
-                # not in a generic openInterest attribute
-                call_oi = int(call_ticker.callOpenInterest or 0) if hasattr(call_ticker, 'callOpenInterest') else 0
-                put_oi = int(put_ticker.putOpenInterest or 0) if hasattr(put_ticker, 'putOpenInterest') else 0
-                
-                # Only add if we have valid data
-                if call_ticker.marketPrice() is not None and put_ticker.marketPrice() is not None:
-                    option_data.append({
-                        'strike': float(strike),
-                        'implied_volatility': float(
-                            (getattr(call_greeks, 'impliedVol', 0.15) + 
-                             getattr(put_greeks, 'impliedVol', 0.15)) / 2
-                        ),
-                        'call_gamma': float(getattr(call_greeks, 'gamma', 0.0)),
-                        'put_gamma': float(getattr(put_greeks, 'gamma', 0.0)),
-                        'call_delta': float(getattr(call_greeks, 'delta', 0.0)),
-                        'put_delta': float(getattr(put_greeks, 'delta', 0.0)),
-                        'call_theta': float(getattr(call_greeks, 'theta', 0.0)),
-                        'put_theta': float(getattr(put_greeks, 'theta', 0.0)),
-                        'call_vega': float(getattr(call_greeks, 'vega', 0.0)),
-                        'put_vega': float(getattr(put_greeks, 'vega', 0.0)),
-                        'call_open_interest': call_oi,
-                        'put_open_interest': put_oi,
-                        'call_volume': int(call_ticker.volume or 0),
-                        'put_volume': int(put_ticker.volume or 0),
-                        'call_bid': float(call_ticker.bid or 0),
-                        'call_ask': float(call_ticker.ask or 0),
-                        'put_bid': float(put_ticker.bid or 0),
-                        'put_ask': float(put_ticker.ask or 0),
-                        'time_to_expiry': time_to_expiry
-                    })
-                else:
-                    logger.warning(f"No market price for strike {strike}")
-                
-                # Cancel market data subscriptions
-                self.ib.cancelMktData(call_ticker)
-                self.ib.cancelMktData(put_ticker)
             
-            # Sort by strike
+            # Get OI data via streaming for all contracts at once
+            oi_data = await self._get_oi_streaming(all_contracts)
+            
+            # Now get snapshot data for each contract with price/Greeks
+            option_data = []
+            
+            for contract in all_contracts:
+                try:
+                    # Request market data with Greeks (use snapshot, no OI ticks)
+                    ticker = self.ib.reqMktData(
+                        contract, 
+                        genericTickList=SNAPSHOT_GENERIC_TICKS,  # No OI ticks
+                        snapshot=True, 
+                        regulatorySnapshot=False
+                    )
+                    
+                    # Wait for snapshot data
+                    await asyncio.sleep(0.5)
+                    
+                    # Only process if we have valid price data
+                    if ticker.marketPrice() is not None:
+                        strike, right = contract_map[contract.conId]
+                        
+                        # Get OI from streaming data
+                        oi_value = oi_data.get(contract.conId, 0)
+                        
+                        # Extract Greeks
+                        greeks = ticker.modelGreeks or {}
+                        
+                        # Find or create option data entry for this strike
+                        strike_data = next((d for d in option_data if d['strike'] == strike), None)
+                        if not strike_data:
+                            strike_data = {
+                                'strike': float(strike),
+                                'time_to_expiry': time_to_expiry,
+                                'implied_volatility': 0.15,  # Default
+                                'call_gamma': 0.0, 'put_gamma': 0.0,
+                                'call_delta': 0.0, 'put_delta': 0.0,
+                                'call_theta': 0.0, 'put_theta': 0.0,
+                                'call_vega': 0.0, 'put_vega': 0.0,
+                                'call_open_interest': 0, 'put_open_interest': 0,
+                                'call_volume': 0, 'put_volume': 0,
+                                'call_bid': 0.0, 'call_ask': 0.0,
+                                'put_bid': 0.0, 'put_ask': 0.0,
+                            }
+                            option_data.append(strike_data)
+                        
+                        # Update with contract-specific data
+                        if right == 'C':
+                            strike_data['call_bid'] = float(ticker.bid or 0)
+                            strike_data['call_ask'] = float(ticker.ask or 0)
+                            strike_data['call_volume'] = int(ticker.volume or 0)
+                            strike_data['call_open_interest'] = oi_value
+                            strike_data['call_delta'] = float(getattr(greeks, 'delta', 0.0))
+                            strike_data['call_gamma'] = float(getattr(greeks, 'gamma', 0.0))
+                            strike_data['call_theta'] = float(getattr(greeks, 'theta', 0.0))
+                            strike_data['call_vega'] = float(getattr(greeks, 'vega', 0.0))
+                        else:
+                            strike_data['put_bid'] = float(ticker.bid or 0)
+                            strike_data['put_ask'] = float(ticker.ask or 0)
+                            strike_data['put_volume'] = int(ticker.volume or 0)
+                            strike_data['put_open_interest'] = oi_value
+                            strike_data['put_delta'] = float(getattr(greeks, 'delta', 0.0))
+                            strike_data['put_gamma'] = float(getattr(greeks, 'gamma', 0.0))
+                            strike_data['put_theta'] = float(getattr(greeks, 'theta', 0.0))
+                            strike_data['put_vega'] = float(getattr(greeks, 'vega', 0.0))
+                        
+                        # Update IV (average of call and put)
+                        if right == 'C' and hasattr(greeks, 'impliedVol'):
+                            call_iv = float(getattr(greeks, 'impliedVol', 0.15))
+                            put_data = next((d for d in option_data if d['strike'] == strike), {})
+                            put_iv = put_data.get('_put_iv', 0.15)
+                            strike_data['implied_volatility'] = (call_iv + put_iv) / 2
+                            strike_data['_call_iv'] = call_iv
+                        elif right == 'P' and hasattr(greeks, 'impliedVol'):
+                            put_iv = float(getattr(greeks, 'impliedVol', 0.15))
+                            strike_data['_put_iv'] = put_iv
+                            call_iv = strike_data.get('_call_iv', 0.15)
+                            strike_data['implied_volatility'] = (call_iv + put_iv) / 2
+                    
+                    # Cancel market data subscription
+                    self.ib.cancelMktData(ticker)
+                    
+                except Exception as e:
+                    logger.warning(f"Error getting data for {contract.strike} {contract.right}: {e}")
+                    continue
+            
+            # Clean up temporary IV fields and sort by strike
+            for data in option_data:
+                data.pop('_call_iv', None)
+                data.pop('_put_iv', None)
+            
             option_data.sort(key=lambda x: x['strike'])
             
             logger.info(f"Retrieved option data for {len(option_data)} strikes")
+            if oi_data:
+                logger.info(f"Successfully retrieved OI data for {len(oi_data)} contracts")
             
             return option_data
             
