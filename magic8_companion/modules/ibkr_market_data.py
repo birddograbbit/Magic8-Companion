@@ -9,7 +9,7 @@ import asyncio
 from typing import Dict, List, Optional, Union
 from datetime import datetime, timedelta
 import numpy as np
-from ib_async import IB, Stock, Option, Contract, util
+from ib_async import IB, Stock, Option, Contract, Index, util
 from magic8_companion.config import settings
 
 logger = logging.getLogger(__name__)
@@ -91,9 +91,8 @@ class IBKRMarketData:
             # Create appropriate contract
             if symbol in ['SPX', 'RUT']:
                 # Index options
-                underlying = Contract(
+                underlying = Index(
                     symbol=ibkr_symbol,
-                    secType='IND',
                     exchange=exchange,
                     currency='USD'
                 )
@@ -106,7 +105,11 @@ class IBKRMarketData:
                 )
             
             # Qualify the contract
-            await self.ib.qualifyContractsAsync(underlying)
+            contracts = await self.ib.qualifyContractsAsync(underlying)
+            if not contracts:
+                logger.error(f"Failed to qualify contract for {symbol}")
+                return None
+            underlying = contracts[0]
             
             # Get current price
             ticker = await self.ib.reqTickersAsync(underlying)
@@ -118,7 +121,7 @@ class IBKRMarketData:
             
             # Get option chain data with Greeks
             option_chain_data = await self._get_option_chain_with_greeks(
-                underlying, current_price
+                underlying, current_price, symbol
             )
             
             if not option_chain_data:
@@ -153,20 +156,56 @@ class IBKRMarketData:
             return None
     
     async def _get_option_chain_with_greeks(
-        self, underlying: Contract, spot_price: float
+        self, underlying: Contract, spot_price: float, original_symbol: str
     ) -> List[Dict]:
         """Fetch option chain with real Greeks from IBKR."""
         try:
-            # Get option chains
-            chains = await self.ib.reqSecDefOptParamsAsync(
-                underlying.symbol,
-                underlying.exchange,
-                underlying.secType,
-                underlying.conId
-            )
+            chains = []
+            
+            # Special handling for SPX
+            if original_symbol == 'SPX':
+                # Try SPXW first (weekly options are more liquid)
+                try:
+                    logger.info("Attempting to fetch SPXW option chain...")
+                    chains = await self.ib.reqSecDefOptParamsAsync(
+                        'SPXW',
+                        '',  # Let IBKR determine the exchange
+                        underlying.secType,
+                        underlying.conId
+                    )
+                    if chains:
+                        logger.info(f"Successfully retrieved SPXW option chain with {len(chains)} chains")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch SPXW options: {e}")
+                
+                # If SPXW fails, try regular SPX
+                if not chains:
+                    logger.info("Attempting to fetch SPX option chain...")
+                    chains = await self.ib.reqSecDefOptParamsAsync(
+                        'SPX',
+                        'CBOE',
+                        underlying.secType,
+                        underlying.conId
+                    )
+                    if chains:
+                        logger.info(f"Successfully retrieved SPX option chain with {len(chains)} chains")
+            else:
+                # Regular handling for other symbols
+                chains = await self.ib.reqSecDefOptParamsAsync(
+                    underlying.symbol,
+                    underlying.exchange,
+                    underlying.secType,
+                    underlying.conId
+                )
             
             if not chains:
+                logger.warning(f"No option chains found for {original_symbol}")
                 return []
+            
+            # Log chain details for debugging
+            for i, chain in enumerate(chains):
+                logger.debug(f"Chain {i}: Exchange={chain.exchange}, Multiplier={chain.multiplier}, "
+                           f"Expirations={len(chain.expirations)}, Strikes={len(chain.strikes)}")
             
             # Find nearest expiration (0DTE or next available)
             today = datetime.now().date()
@@ -175,96 +214,119 @@ class IBKRMarketData:
             for chain in chains:
                 for exp in chain.expirations:
                     exp_date = datetime.strptime(exp, '%Y%m%d').date()
-                    expirations.append((exp, exp_date))
+                    expirations.append((exp, exp_date, chain))
             
             if not expirations:
+                logger.warning("No expirations found in option chains")
                 return []
             
             # Sort by date and get nearest
             expirations.sort(key=lambda x: x[1])
-            nearest_exp, exp_date = expirations[0]
+            nearest_exp, exp_date, selected_chain = expirations[0]
+            
+            logger.info(f"Selected expiration: {nearest_exp} ({exp_date})")
             
             # Calculate time to expiry
             days_to_exp = max(0.25, (exp_date - today).days)  # Min 0.25 for 0DTE
             time_to_expiry = days_to_exp / 365.0
             
             # Get strikes near the money (within 5% of spot)
-            chain = chains[0]  # Use first chain
             strike_range = spot_price * 0.05
             min_strike = spot_price - strike_range
             max_strike = spot_price + strike_range
             
             # Filter strikes
-            strikes = [float(s) for s in chain.strikes 
+            strikes = [float(s) for s in selected_chain.strikes 
                       if min_strike <= float(s) <= max_strike]
             
             if not strikes:
                 # If no strikes in range, get 10 closest
-                all_strikes = sorted([float(s) for s in chain.strikes], 
+                all_strikes = sorted([float(s) for s in selected_chain.strikes], 
                                    key=lambda x: abs(x - spot_price))
                 strikes = all_strikes[:10]
             
+            logger.info(f"Selected {len(strikes)} strikes near {spot_price}")
+            
             option_data = []
+            
+            # Determine the correct symbol for option contracts
+            option_symbol = 'SPXW' if original_symbol == 'SPX' and chains[0].tradingClass == 'SPXW' else underlying.symbol
             
             # Fetch Greeks for each strike
             for strike in strikes:
                 # Create call and put contracts
                 call = Option(
-                    symbol=underlying.symbol,
+                    symbol=option_symbol,
                     lastTradeDateOrContractMonth=nearest_exp,
                     strike=strike,
                     right='C',
-                    exchange=chain.exchange,
+                    exchange=selected_chain.exchange,
                     currency='USD'
                 )
                 
                 put = Option(
-                    symbol=underlying.symbol,
+                    symbol=option_symbol,
                     lastTradeDateOrContractMonth=nearest_exp,
                     strike=strike,
                     right='P',
-                    exchange=chain.exchange,
+                    exchange=selected_chain.exchange,
                     currency='USD'
                 )
                 
                 # Qualify contracts
-                await self.ib.qualifyContractsAsync(call, put)
+                try:
+                    qualified_call = await self.ib.qualifyContractsAsync(call)
+                    qualified_put = await self.ib.qualifyContractsAsync(put)
+                    
+                    if not qualified_call or not qualified_put:
+                        logger.warning(f"Failed to qualify contracts for strike {strike}")
+                        continue
+                        
+                    call = qualified_call[0]
+                    put = qualified_put[0]
+                except Exception as e:
+                    logger.warning(f"Error qualifying contracts for strike {strike}: {e}")
+                    continue
                 
                 # Request market data with Greeks (use snapshot)
                 call_ticker = self.ib.reqMktData(call, '', True, False)
                 put_ticker = self.ib.reqMktData(put, '', True, False)
                 
                 # Wait for data
-                await asyncio.sleep(1)  # Give time for Greeks to populate
+                await asyncio.sleep(1.5)  # Give more time for Greeks to populate
                 
                 # Extract Greeks and market data
                 call_greeks = call_ticker.modelGreeks or {}
                 put_greeks = put_ticker.modelGreeks or {}
                 
-                option_data.append({
-                    'strike': float(strike),
-                    'implied_volatility': float(
-                        (getattr(call_greeks, 'impliedVol', 0.15) + 
-                         getattr(put_greeks, 'impliedVol', 0.15)) / 2
-                    ),
-                    'call_gamma': float(getattr(call_greeks, 'gamma', 0.0)),
-                    'put_gamma': float(getattr(put_greeks, 'gamma', 0.0)),
-                    'call_delta': float(getattr(call_greeks, 'delta', 0.0)),
-                    'put_delta': float(getattr(put_greeks, 'delta', 0.0)),
-                    'call_theta': float(getattr(call_greeks, 'theta', 0.0)),
-                    'put_theta': float(getattr(put_greeks, 'theta', 0.0)),
-                    'call_vega': float(getattr(call_greeks, 'vega', 0.0)),
-                    'put_vega': float(getattr(put_greeks, 'vega', 0.0)),
-                    'call_open_interest': int(call_ticker.openInterest or 0),
-                    'put_open_interest': int(put_ticker.openInterest or 0),
-                    'call_volume': int(call_ticker.volume or 0),
-                    'put_volume': int(put_ticker.volume or 0),
-                    'call_bid': float(call_ticker.bid or 0),
-                    'call_ask': float(call_ticker.ask or 0),
-                    'put_bid': float(put_ticker.bid or 0),
-                    'put_ask': float(put_ticker.ask or 0),
-                    'time_to_expiry': time_to_expiry
-                })
+                # Only add if we have valid data
+                if call_ticker.marketPrice() is not None and put_ticker.marketPrice() is not None:
+                    option_data.append({
+                        'strike': float(strike),
+                        'implied_volatility': float(
+                            (getattr(call_greeks, 'impliedVol', 0.15) + 
+                             getattr(put_greeks, 'impliedVol', 0.15)) / 2
+                        ),
+                        'call_gamma': float(getattr(call_greeks, 'gamma', 0.0)),
+                        'put_gamma': float(getattr(put_greeks, 'gamma', 0.0)),
+                        'call_delta': float(getattr(call_greeks, 'delta', 0.0)),
+                        'put_delta': float(getattr(put_greeks, 'delta', 0.0)),
+                        'call_theta': float(getattr(call_greeks, 'theta', 0.0)),
+                        'put_theta': float(getattr(put_greeks, 'theta', 0.0)),
+                        'call_vega': float(getattr(call_greeks, 'vega', 0.0)),
+                        'put_vega': float(getattr(put_greeks, 'vega', 0.0)),
+                        'call_open_interest': int(call_ticker.openInterest or 0),
+                        'put_open_interest': int(put_ticker.openInterest or 0),
+                        'call_volume': int(call_ticker.volume or 0),
+                        'put_volume': int(put_ticker.volume or 0),
+                        'call_bid': float(call_ticker.bid or 0),
+                        'call_ask': float(call_ticker.ask or 0),
+                        'put_bid': float(put_ticker.bid or 0),
+                        'put_ask': float(put_ticker.ask or 0),
+                        'time_to_expiry': time_to_expiry
+                    })
+                else:
+                    logger.warning(f"No market price for strike {strike}")
                 
                 # Cancel market data subscriptions
                 self.ib.cancelMktData(call_ticker)
@@ -273,10 +335,12 @@ class IBKRMarketData:
             # Sort by strike
             option_data.sort(key=lambda x: x['strike'])
             
+            logger.info(f"Retrieved option data for {len(option_data)} strikes")
+            
             return option_data
             
         except Exception as e:
-            logger.error(f"Error fetching option chain with Greeks: {e}")
+            logger.error(f"Error fetching option chain with Greeks: {e}", exc_info=True)
             return []
     
     def _calculate_iv_percentile(self, option_chain: List[Dict]) -> float:
