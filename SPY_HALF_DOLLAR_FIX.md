@@ -75,3 +75,12 @@ else:
 ```
 
 This ensures SPY options use IB's smart routing to find the best exchange for each strike.
+
+### June 11 Update
+
+The code now implements a `qualify_contract_with_fallback` helper that retries
+qualification across multiple exchanges if the initial attempt fails. For SPY
+the sequence is `SMART`, `CBOE`, `AMEX`, then `ISE`.  The logs show which
+exchange ultimately succeeds so we can track where half-dollar strikes are
+available.  This fallback removes the `No security definition` warnings during
+testing.
