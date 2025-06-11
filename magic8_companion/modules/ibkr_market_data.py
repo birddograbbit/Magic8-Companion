@@ -355,6 +355,11 @@ class IBKRMarketData:
             
             # Get ATM strike
             all_strikes = sorted([float(s) for s in selected_chain.strikes])
+            if original_symbol == 'SPY':
+                all_strikes = [s for s in all_strikes if s.is_integer()]
+                logger.debug(
+                    f"Filtered SPY strikes to whole dollars: {len(all_strikes)} available"
+                )
             atm_strike = min(all_strikes, key=lambda x: abs(x - spot_price))
             atm_index = all_strikes.index(atm_strike)
             
