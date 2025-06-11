@@ -93,7 +93,7 @@ python test_live_data.py
 ### 5. Run
 
 ```bash
-python -m magic8_companion.main
+python -m magic8_companion
 ```
 
 ## Output Format
