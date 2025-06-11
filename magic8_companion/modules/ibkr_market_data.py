@@ -340,6 +340,13 @@ class IBKRMarketData:
             # Use the symbol from the underlying contract
             option_symbol = underlying.symbol
             
+            # Force SMART routing for SPY to ensure all strikes are accessible
+            if original_symbol == 'SPY':
+                contract_exchange = 'SMART'
+                logger.info(f"Using SMART routing for {original_symbol} to ensure all strikes are accessible")
+            else:
+                contract_exchange = selected_chain.exchange
+            
             # First, create and qualify all contracts
             for strike in strikes:
                 # Create call and put contracts
@@ -348,7 +355,7 @@ class IBKRMarketData:
                     lastTradeDateOrContractMonth=nearest_exp,
                     strike=strike,
                     right='C',
-                    exchange=selected_chain.exchange,
+                    exchange=contract_exchange,
                     currency='USD'
                 )
                 
@@ -357,7 +364,7 @@ class IBKRMarketData:
                     lastTradeDateOrContractMonth=nearest_exp,
                     strike=strike,
                     right='P',
-                    exchange=selected_chain.exchange,
+                    exchange=contract_exchange,
                     currency='USD'
                 )
                 
@@ -459,7 +466,12 @@ class IBKRMarketData:
                             if right == 'C':
                                 strike_data['call_bid'] = float(ticker.bid or 0)
                                 strike_data['call_ask'] = float(ticker.ask or 0)
-                                strike_data['call_volume'] = int(ticker.volume or 0)
+                                # Handle NaN values in volume
+                                volume = ticker.volume
+                                if volume is not None and not math.isnan(volume):
+                                    strike_data['call_volume'] = int(volume)
+                                else:
+                                    strike_data['call_volume'] = 0
                                 strike_data['call_open_interest'] = oi_value
                                 strike_data['call_delta'] = float(getattr(greeks, 'delta', 0.0))
                                 strike_data['call_gamma'] = float(getattr(greeks, 'gamma', 0.0))
@@ -470,7 +482,12 @@ class IBKRMarketData:
                             else:
                                 strike_data['put_bid'] = float(ticker.bid or 0)
                                 strike_data['put_ask'] = float(ticker.ask or 0)
-                                strike_data['put_volume'] = int(ticker.volume or 0)
+                                # Handle NaN values in volume
+                                volume = ticker.volume
+                                if volume is not None and not math.isnan(volume):
+                                    strike_data['put_volume'] = int(volume)
+                                else:
+                                    strike_data['put_volume'] = 0
                                 strike_data['put_open_interest'] = oi_value
                                 strike_data['put_delta'] = float(getattr(greeks, 'delta', 0.0))
                                 strike_data['put_gamma'] = float(getattr(greeks, 'gamma', 0.0))
