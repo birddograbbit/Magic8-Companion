@@ -8,6 +8,7 @@ import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
 import pandas as pd
+import asyncio
 from collections import deque
 
 from ..config import settings
@@ -55,10 +56,10 @@ class MarketAnalyzer:
         # Fallback logic
         try:
             if self.provider == "yahoo" or self.provider == "ib":
-                return self._get_yahoo_market_data(symbol)
+                return await self._get_yahoo_market_data(symbol)
             elif self.provider == "polygon":
                 logger.warning("Polygon data provider not implemented yet, using Yahoo")
-                return self._get_yahoo_market_data(symbol)
+                return await self._get_yahoo_market_data(symbol)
             else:
                 logger.error(f"Unknown market data provider: {self.provider}")
                 return None
@@ -161,7 +162,7 @@ class MarketAnalyzer:
         history = list(self.iv_history[symbol])
         return (sum(1 for iv in history if iv <= current_iv) / len(history)) * 100
     
-    def _get_yahoo_market_data(self, symbol: str) -> Dict:
+    async def _get_yahoo_market_data(self, symbol: str) -> Dict:
         """Get market data from Yahoo Finance."""
         # For index symbols, Yahoo uses ^ prefix
         yahoo_symbol = f"^{symbol}" if symbol in ["SPX", "RUT"] else symbol
@@ -169,10 +170,10 @@ class MarketAnalyzer:
         try:
             # Get ticker object
             ticker = yf.Ticker(yahoo_symbol)
-            
+
             # Get current price and historical data
-            info = ticker.info
-            hist = ticker.history(period="30d")
+            info = await asyncio.to_thread(lambda: ticker.info)
+            hist = await asyncio.to_thread(ticker.history, period="30d")
             
             # Calculate realized volatility (30-day)
             returns = hist['Close'].pct_change().dropna()
@@ -181,10 +182,10 @@ class MarketAnalyzer:
             # Get options chain for IV calculation
             try:
                 # Get nearest expiration
-                expirations = ticker.options
+                expirations = await asyncio.to_thread(lambda: ticker.options)
                 if expirations:
                     nearest_exp = expirations[0]
-                    opt_chain = ticker.option_chain(nearest_exp)
+                    opt_chain = await asyncio.to_thread(ticker.option_chain, nearest_exp)
                     
                     # Calculate approximate IV from ATM options
                     current_price = hist['Close'].iloc[-1]
