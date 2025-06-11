@@ -539,7 +539,7 @@ services:
       - MAGIC8_FILE_PATH=${MAGIC8_FILE_PATH:-/data/magic8_output.json}
       - IB_HOST=${IB_HOST:-host.docker.internal}
       - IB_PORT=${IB_PORT:-7497}
-      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
+      - M8C_DISCORD_WEBHOOK=${M8C_DISCORD_WEBHOOK}
       - TZ=America/New_York
     volumes:
       - ./data:/app/data
@@ -620,7 +620,7 @@ cd Magic8-Companion
 
 # Configure environment
 cp .env.example .env
-nano .env  # Set MAGIC8_FILE_PATH, DISCORD_WEBHOOK, etc.
+nano .env  # Set MAGIC8_FILE_PATH, M8C_DISCORD_WEBHOOK, etc.
 
 # Start system
 docker-compose up -d

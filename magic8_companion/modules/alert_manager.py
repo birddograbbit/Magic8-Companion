@@ -20,7 +20,7 @@ def send_discord_alert(message: str):
 
 if __name__ == '__main__':
     # Example usage (for testing purposes)
-    # You would need to have your .env file configured with DISCORD_WEBHOOK
+    # You would need to have your .env file configured with M8C_DISCORD_WEBHOOK
     # from ..config import Settings # To re-initialize if run directly for testing
     # settings_test = Settings() # Re-load for direct script run; careful with relative imports
 
@@ -30,5 +30,5 @@ if __name__ == '__main__':
     # If settings.discord_webhook:
     #     send_discord_alert("Test alert from alert_manager.py!")
     # else:
-    #     print("Skipping example: DISCORD_WEBHOOK not set in .env for direct testing.")
+    #     print("Skipping example: M8C_DISCORD_WEBHOOK not set in .env for direct testing.")
     pass

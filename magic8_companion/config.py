@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     log_file_path: str = "logs/magic8_companion.log"
     log_file_max_size: int = 10485760
     log_file_backup_count: int = 5
+
+    # Alert settings
+    discord_webhook: str = ""
     
     # Performance settings
     enable_caching: bool = True
