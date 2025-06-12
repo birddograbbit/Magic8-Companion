@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # Core recommendation settings
     output_file_path: str = "data/recommendations.json"
     supported_symbols: List[str] = ["SPX", "SPY", "QQQ", "RUT"]
-    checkpoint_times: List[str] = ["10:30", "11:00", "12:30", "14:45", "14:50", "14:55", "15:00", "15:05", "15:10", "15:15", "15:20", "15:25", "15:30", "15:35", "15:40", "15:45", "15:50", "15:55"]
+    checkpoint_times: List[str] = ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"]
     
     # Scoring thresholds
     min_recommendation_score: int = 70
