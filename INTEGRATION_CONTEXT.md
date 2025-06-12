@@ -26,7 +26,25 @@ You have two interconnected trading systems that work together:
   - 18 checkpoints including every 5 minutes from 14:50-15:55
   - Supports SPX, SPY, QQQ, RUT
   - All IBKR fixes applied (NaN handling, SPY SMART routing)
-- **Output Format**: Generates recommendations with preferred_strategy, score, and confidence levels
+- **Output Format**: Generates recommendations with a `strategies` dictionary (including `should_trade`) and a `best_strategy` field
+
+Example snippet:
+
+```json
+{
+  "timestamp": "2025-06-11T14:45:00Z",
+  "recommendations": {
+    "SPX": {
+      "strategies": {
+        "Butterfly": { "score": 85.0, "confidence": "HIGH", "should_trade": true },
+        "Iron_Condor": { "score": 65.0, "confidence": "MEDIUM", "should_trade": false },
+        "Vertical": { "score": 50.0, "confidence": "LOW", "should_trade": false }
+      },
+      "best_strategy": "Butterfly"
+    }
+  }
+}
+```
 
 ### DiscordTrading (INTEGRATION READY ✅)
 - **Branch**: dev (has Magic8 integration built-in)
