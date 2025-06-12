@@ -20,7 +20,7 @@ ib_async==1.0.1
 # === ENHANCED INDICATORS ===
 
 # Greeks Calculations (Production-ready from PyPI)
-py-vollib-vectorized==0.1.3
+py-vollib-vectorized==0.1.1
 py_vollib==1.0.1  # Base library for fallback
 
 # Additional Data Processing
