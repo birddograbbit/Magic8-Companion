@@ -71,10 +71,16 @@ async def test_live_recommendations():
         if recommendations.get("recommendations"):
             for symbol, rec in recommendations["recommendations"].items():
                 print(f"\n{symbol}:")
-                print(f"  Strategy: {rec['preferred_strategy']}")
-                print(f"  Score: {rec['score']}")
-                print(f"  Confidence: {rec['confidence']}")
-                print(f"  Rationale: {rec['rationale']}")
+                print(f"  Best Strategy: {rec['best_strategy']}")
+
+                for strat, details in rec.get("strategies", {}).items():
+                    print(f"  {strat}:")
+                    print(f"    Score: {details['score']}")
+                    print(f"    Confidence: {details['confidence']}")
+                    print(f"    Should Trade: {details['should_trade']}")
+                    if 'rationale' in details:
+                        print(f"    Rationale: {details['rationale']}")
+
                 if 'current_price' in rec.get('market_conditions', {}):
                     print(f"  Current Price: ${rec['market_conditions']['current_price']}")
                 if 'implied_vol' in rec.get('market_conditions', {}):

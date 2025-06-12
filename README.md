@@ -107,14 +107,25 @@ The system outputs recommendations to `data/recommendations.json`:
   "enhanced_indicators": true,
   "recommendations": {
     "SPX": {
-      "preferred_strategy": "Butterfly",
-      "score": 85.0,
-      "confidence": "HIGH",
-      "all_scores": {
-        "Butterfly": 85.0,
-        "Iron_Condor": 65.0,
-        "Vertical": 50.0
+      "strategies": {
+        "Butterfly": {
+          "score": 85.0,
+          "confidence": "HIGH",
+          "should_trade": true,
+          "rationale": "Low volatility environment (IV: 25%) with tight expected range (0.5%)"
+        },
+        "Iron_Condor": {
+          "score": 65.0,
+          "confidence": "MEDIUM",
+          "should_trade": false
+        },
+        "Vertical": {
+          "score": 50.0,
+          "confidence": "LOW",
+          "should_trade": false
+        }
       },
+      "best_strategy": "Butterfly",
       "market_conditions": {
         "iv_rank": 25.0,
         "range_expectation": 0.005,
@@ -124,8 +135,7 @@ The system outputs recommendations to `data/recommendations.json`:
           "advanced_gex_enabled": true,
           "volume_analysis_enabled": true
         }
-      },
-      "rationale": "Low volatility environment (IV: 25%) with tight expected range (0.5%)"
+      }
     }
   }
 }
