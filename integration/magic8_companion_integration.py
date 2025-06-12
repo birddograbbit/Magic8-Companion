@@ -43,26 +43,57 @@ class Magic8CompanionIntegration:
             
             # Map strategy names (DiscordTrading uses "Sonar", Magic8-Companion uses "Iron_Condor")
             mapped_strategy = self._map_strategy_name(strategy_type)
-            
+
             # Get recommendation for this symbol
             symbol_rec = recommendations.get("recommendations", {}).get(symbol)
-            
+
             if not symbol_rec:
                 logger.debug(f"No Magic8-Companion recommendation for {symbol}, allowing {strategy_type}")
                 return True  # Allow if no specific recommendation for symbol
-            
+
+            strategies = symbol_rec.get("strategies")
+
+            if strategies:
+                strategy_data = strategies.get(mapped_strategy)
+
+                if not strategy_data:
+                    logger.debug(
+                        f"No strategy data for {mapped_strategy} on {symbol}; allowing {strategy_type}"
+                    )
+                    return True
+
+                should_trade = strategy_data.get("should_trade", True)
+                confidence = strategy_data.get(
+                    "confidence", symbol_rec.get("confidence", "MEDIUM")
+                )
+
+                if should_trade:
+                    logger.info(
+                        f"✅ {symbol} {strategy_type}: APPROVED by Magic8-Companion ({confidence})"
+                    )
+                    return True
+
+                logger.info(
+                    f"🚫 {symbol} {strategy_type}: BLOCKED by Magic8-Companion ({confidence})"
+                )
+                return False
+
+            # Fallback for older recommendation format
             preferred_strategy = symbol_rec.get("preferred_strategy")
             confidence = symbol_rec.get("confidence", "MEDIUM")
-            
-            # Check if this is the preferred strategy
-            is_preferred = (mapped_strategy == preferred_strategy)
-            
+
+            is_preferred = mapped_strategy == preferred_strategy
+
             if is_preferred:
-                logger.info(f"✅ {symbol} {strategy_type}: RECOMMENDED by Magic8-Companion ({confidence} confidence)")
+                logger.info(
+                    f"✅ {symbol} {strategy_type}: RECOMMENDED by Magic8-Companion ({confidence} confidence)"
+                )
                 return True
-            else:
-                logger.info(f"🚫 {symbol} {strategy_type}: NOT recommended by Magic8-Companion (prefers {preferred_strategy})")
-                return False
+
+            logger.info(
+                f"🚫 {symbol} {strategy_type}: NOT recommended by Magic8-Companion (prefers {preferred_strategy})"
+            )
+            return False
                 
         except Exception as e:
             logger.error(f"Error checking Magic8-Companion recommendation: {e}")
@@ -104,10 +135,25 @@ class Magic8CompanionIntegration:
                 return
                 
             for symbol, rec in recs.items():
-                strategy = rec.get("preferred_strategy", "Unknown")
-                score = rec.get("score", 0)
-                confidence = rec.get("confidence", "MEDIUM")
-                logger.info(f"  {symbol}: {strategy} (Score: {score}, {confidence})")
+                strategies = rec.get("strategies")
+
+                if strategies:
+                    logger.info(f"  {symbol} recommendations:")
+                    for strat_name, strat_data in strategies.items():
+                        score = strat_data.get("score", 0)
+                        confidence = strat_data.get("confidence", "MEDIUM")
+                        trade = strat_data.get("should_trade", False)
+                        status = "✅ TRADE" if trade else "⏭️  SKIP"
+                        logger.info(
+                            f"    {strat_name}: {confidence} ({score}) - {status}"
+                        )
+                else:
+                    strategy = rec.get("preferred_strategy", "Unknown")
+                    score = rec.get("score", 0)
+                    confidence = rec.get("confidence", "MEDIUM")
+                    logger.info(
+                        f"  {symbol}: {strategy} (Score: {score}, {confidence})"
+                    )
                 
         except Exception as e:
             logger.error(f"Error logging recommendation status: {e}")
