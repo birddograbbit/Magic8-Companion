@@ -1,35 +1,26 @@
 """
-Simplified configuration for Magic8-Companion recommendation engine.
-Focuses on core settings without IB/Discord complexity.
+Legacy config_simplified.py - DEPRECATED
+This file now proxies to unified_config.py for backward compatibility.
+
+MIGRATION PATH:
+- Change imports from: from .config_simplified import settings
+- Change imports to:   from .unified_config import settings
 """
-from pydantic_settings import BaseSettings
-from typing import List
+import warnings
 
+# Issue deprecation warning
+warnings.warn(
+    "config_simplified.py is deprecated. Please use unified_config.py instead. "
+    "This file will be removed in a future version.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
-class SimplifiedSettings(BaseSettings):
-    """Simplified settings for recommendation engine."""
-    
-    # Core recommendation settings
-    output_file_path: str = "data/recommendations.json"
-    supported_symbols: List[str] = ["SPX", "SPY", "QQQ", "RUT"]
-    checkpoint_times: List[str] = ["10:30", "11:00", "12:30", "14:45"]
-    
-    # Scoring thresholds
-    min_recommendation_score: int = 70
-    min_score_gap: int = 15
-    
-    # Market analysis settings
-    use_mock_data: bool = True  # For testing without real market data
-    mock_iv_percentile: float = 65.0
-    mock_expected_range_pct: float = 0.008  # 0.8%
-    
-    # Time zone
-    timezone: str = "America/New_York"
-    
-    class Config:
-        env_file = ".env"
-        env_prefix = "M8C_"  # Magic8-Companion prefix
+# Proxy to the unified config with simple mode
+from .unified_config import Settings, get_simplified_settings
 
+# For backward compatibility, provide settings in simple mode
+settings = get_simplified_settings()
 
-# Global settings instance
-settings = SimplifiedSettings()
+# Maintain backward compatibility
+__all__ = ['Settings', 'settings']
