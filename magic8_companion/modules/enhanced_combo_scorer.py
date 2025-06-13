@@ -2,6 +2,7 @@
 Enhanced Combo Scorer Module
 Integrates all enhanced indicators while maintaining backward compatibility.
 Ship-fast approach: Wrapper around existing scorer with optional enhancements.
+Made MORE GENEROUS to reduce conservative bias.
 """
 
 import logging
@@ -18,6 +19,7 @@ class EnhancedComboScorer(ComboScorer):
     Enhanced version of ComboScorer with additional indicators.
     
     Maintains full backward compatibility - enhancements are optional.
+    Made MORE GENEROUS to reduce overly conservative behavior.
     """
     
     def __init__(self):
@@ -189,6 +191,7 @@ class EnhancedComboScorer(ComboScorer):
         Score all strategies with enhanced indicators.
         
         Uses the same approach as the base class but returns enhanced scores.
+        Made MORE GENEROUS confidence thresholds.
         """
         # Get symbol from market data or use default
         symbol = market_data.get('symbol', 'SPX')
@@ -196,13 +199,13 @@ class EnhancedComboScorer(ComboScorer):
         # Get enhanced scores using our overridden method
         scores = self.score_combo_types(market_data, symbol)
         
-        # Convert to detailed results format
+        # Convert to detailed results format with MORE GENEROUS thresholds
         results = {}
         for strategy, score in scores.items():
-            # Determine confidence based on score
-            if score >= 75:
+            # MORE LENIENT confidence thresholds
+            if score >= 65:  # Down from 75
                 confidence = "HIGH"
-            elif score >= 50:
+            elif score >= 45:  # Down from 50
                 confidence = "MEDIUM"
             else:
                 confidence = "LOW"
@@ -210,7 +213,7 @@ class EnhancedComboScorer(ComboScorer):
             results[strategy] = {
                 'score': score,
                 'confidence': confidence,
-                'should_trade': score >= 50,  # Assuming 50 as minimum trade threshold
+                'should_trade': score >= 45,  # Down from 50 - more lenient trading threshold
                 'enhanced': True
             }
         
