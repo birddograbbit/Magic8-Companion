@@ -115,6 +115,7 @@ class UnifiedComboScorer:
         
         self.enable_greeks = getattr(settings, 'enable_greeks', False)
         self.enable_advanced_gex = getattr(settings, 'enable_advanced_gex', False)
+        self.enable_enhanced_gex = getattr(settings, 'enable_enhanced_gex', False)
         self.enable_volume_analysis = getattr(settings, 'enable_volume_analysis', False)
         
         # Initialize wrappers only if enhancements are enabled
@@ -127,14 +128,22 @@ class UnifiedComboScorer:
                 logger.warning("Greeks wrapper not available")
                 self.enable_greeks = False
                 
-        if self.enable_advanced_gex:
+        if self.enable_advanced_gex or self.enable_enhanced_gex:
             try:
-                from magic8_companion.wrappers import GammaExposureWrapper
-                self.gex_wrapper = GammaExposureWrapper()
-                logger.info("GEX wrapper initialized")
+                # Try enhanced GEX wrapper first
+                from magic8_companion.wrappers.enhanced_gex_wrapper import EnhancedGEXWrapper
+                self.enhanced_gex_wrapper = EnhancedGEXWrapper()
+                logger.info("Enhanced GEX wrapper initialized")
             except ImportError:
-                logger.warning("GEX wrapper not available")
-                self.enable_advanced_gex = False
+                logger.warning("Enhanced GEX wrapper not available, trying standard GEX")
+                try:
+                    from magic8_companion.wrappers import GammaExposureWrapper
+                    self.gex_wrapper = GammaExposureWrapper()
+                    logger.info("Standard GEX wrapper initialized")
+                except ImportError:
+                    logger.warning("No GEX wrapper available")
+                    self.enable_advanced_gex = False
+                    self.enable_enhanced_gex = False
                 
         if self.enable_volume_analysis:
             try:
@@ -282,8 +291,8 @@ class UnifiedComboScorer:
                 for strategy in enhanced_scores:
                     enhanced_scores[strategy] += greeks_adj.get(strategy, 0)
             
-            # Apply GEX adjustments
-            if hasattr(self, 'gex_wrapper'):
+            # Apply GEX adjustments (enhanced or standard)
+            if hasattr(self, 'enhanced_gex_wrapper') or hasattr(self, 'gex_wrapper'):
                 gex_adj = self._calculate_gex_adjustments(market_data)
                 for strategy in enhanced_scores:
                     enhanced_scores[strategy] += gex_adj.get(strategy, 0)
@@ -309,8 +318,43 @@ class UnifiedComboScorer:
         return {"Butterfly": 0, "Iron_Condor": 0, "Vertical": 0}
     
     def _calculate_gex_adjustments(self, market_data: Dict) -> Dict[str, float]:
-        """Calculate GEX-based scoring adjustments."""
-        # Placeholder - would implement actual GEX logic here  
+        """Calculate GEX-based scoring adjustments using enhanced gamma analysis."""
+        
+        try:
+            # Try enhanced GEX wrapper first if available
+            if hasattr(self, 'enhanced_gex_wrapper'):
+                # Get gamma adjustments from MLOptionTrading
+                gamma_data = self.enhanced_gex_wrapper.get_gamma_adjustments()
+                
+                if gamma_data:
+                    # Apply sophisticated adjustments from MLOptionTrading
+                    adjustments = {}
+                    for strategy in ['Butterfly', 'Iron_Condor', 'Vertical']:
+                        adj = self.enhanced_gex_wrapper.calculate_strategy_adjustments(
+                            strategy, gamma_data
+                        )
+                        adjustments[strategy] = adj
+                    
+                    # Log gamma metrics for transparency
+                    metrics = self.enhanced_gex_wrapper.get_gamma_metrics(gamma_data)
+                    logger.info(
+                        f"Enhanced GEX adjustments - Regime: {metrics['regime']}, "
+                        f"Bias: {metrics['bias']}, Net GEX: ${metrics['net_gex']:,.0f}"
+                    )
+                    
+                    return adjustments
+                else:
+                    logger.debug("No fresh gamma data available from MLOptionTrading")
+            
+            # Fallback to standard GEX wrapper if available
+            if hasattr(self, 'gex_wrapper'):
+                # Use the existing simple GEX implementation
+                return {"Butterfly": 0, "Iron_Condor": 0, "Vertical": 0}
+                
+        except Exception as e:
+            logger.warning(f"GEX adjustment calculation failed: {e}")
+        
+        # Return zero adjustments if calculation fails
         return {"Butterfly": 0, "Iron_Condor": 0, "Vertical": 0}
     
     def _calculate_volume_adjustments(self, market_data: Dict) -> Dict[str, float]:
