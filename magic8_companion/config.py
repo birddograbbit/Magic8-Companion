@@ -14,9 +14,9 @@ class Settings(BaseSettings):
     supported_symbols: List[str] = ["SPX", "SPY", "QQQ", "RUT"]
     checkpoint_times: List[str] = ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"]
     
-    # Scoring thresholds
-    min_recommendation_score: int = 70
-    min_score_gap: int = 15
+    # Scoring thresholds - MADE MORE LENIENT
+    min_recommendation_score: int = 60  # Down from 70
+    min_score_gap: int = 10  # Down from 15
     
     # Market analysis settings
     use_mock_data: bool = True  # For testing without real market data
@@ -76,10 +76,10 @@ class Settings(BaseSettings):
     volume_anomaly_threshold: float = 2.5
     volume_liquidity_min_oi: int = 100
     
-    # Strategy thresholds
-    butterfly_iv_threshold: int = 40
-    iron_condor_iv_range: List[int] = [30, 80]
-    vertical_min_iv: int = 50
+    # Strategy thresholds - MADE MORE LENIENT
+    butterfly_iv_threshold: int = 50  # Up from 40
+    iron_condor_iv_range: List[int] = [25, 85]  # Expanded from [30, 80]
+    vertical_min_iv: int = 40  # Down from 50
     
     class Config:
         env_file = ".env"
