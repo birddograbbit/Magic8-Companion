@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import asyncio
 from collections import deque
+import json
+from pathlib import Path
 
 from ..config import settings
 from ..modules.ib_client_manager import IBClientManager
@@ -25,6 +27,7 @@ class MarketAnalyzer:
         self.provider = settings.market_data_provider
         self.ib_client_manager = None
         self.iv_history = {}  # Store historical IV for percentile calculation
+        self.cache_dir = Path('data')
         
         # Initialize IB client manager if configured
         if self.provider == "ib" or not self.use_mock_data:
@@ -33,15 +36,58 @@ class MarketAnalyzer:
             except Exception as e:
                 logger.warning(f"Failed to initialize IB client manager: {e}")
                 self.ib_client_manager = None
+    
+    def _write_market_data_cache(self, symbol: str, market_data: Dict, option_chain_data: Optional[List] = None):
+        """Write market data to cache for sharing with other modules."""
+        try:
+            # Ensure cache directory exists
+            self.cache_dir.mkdir(exist_ok=True)
+            
+            cache_file = self.cache_dir / 'market_data_cache.json'
+            
+            # Read existing cache or create new
+            if cache_file.exists():
+                with open(cache_file, 'r') as f:
+                    cache = json.load(f)
+            else:
+                cache = {"timestamp": None, "source": None, "data": {}}
+            
+            # Update cache
+            cache["timestamp"] = datetime.now().isoformat()
+            cache["source"] = market_data.get("data_provider", "unknown")
+            
+            # Store market data
+            cache["data"][symbol] = {
+                "spot_price": market_data.get("current_price", 0),
+                "implied_vol": market_data.get("implied_vol", 20),
+                "iv_percentile": market_data.get("iv_percentile", 50),
+                "last_updated": datetime.now().isoformat(),
+                "option_chain": option_chain_data or []
+            }
+            
+            # Write cache
+            with open(cache_file, 'w') as f:
+                json.dump(cache, f, indent=2)
+                
+            logger.debug(f"Market data cache updated for {symbol}")
+            
+        except Exception as e:
+            logger.error(f"Error writing market data cache: {e}")
         
     async def analyze_symbol(self, symbol: str) -> Optional[Dict]:
         """Analyze market conditions for a symbol."""
         logger.debug(f"Analyzing market conditions for {symbol}")
         
         if self.use_mock_data:
-            return self._get_mock_market_data(symbol)
+            market_data = self._get_mock_market_data(symbol)
         else:
-            return await self._get_live_market_data(symbol)
+            market_data = await self._get_live_market_data(symbol)
+        
+        # Write to cache for other modules to use
+        if market_data:
+            self._write_market_data_cache(symbol, market_data)
+            
+        return market_data
     
     async def _get_live_market_data(self, symbol: str) -> Optional[Dict]:
         """Get live market data, prioritizing IB then falling back to other providers."""
@@ -123,7 +169,19 @@ class MarketAnalyzer:
             else:
                 gamma_env = self._determine_gamma_environment(iv_percentile, expected_range_pct)
             
-            return {
+            # Prepare option chain data for cache
+            option_chain_data = []
+            for opt in atm_options:
+                option_chain_data.append({
+                    "strike": opt.get("strike", 0),
+                    "call_oi": opt.get("open_interest", 0) if opt.get("right") == "C" else 0,
+                    "put_oi": opt.get("open_interest", 0) if opt.get("right") == "P" else 0,
+                    "call_iv": opt.get("implied_volatility", 0.20) if opt.get("right") == "C" else 0,
+                    "put_iv": opt.get("implied_volatility", 0.20) if opt.get("right") == "P" else 0,
+                    "dte": 0  # 0DTE for MLOptionTrading
+                })
+            
+            market_data = {
                 "symbol": symbol,
                 "iv_percentile": round(iv_percentile, 1),
                 "expected_range_pct": round(expected_range_pct, 4),
@@ -135,6 +193,11 @@ class MarketAnalyzer:
                 "is_mock_data": False,
                 "data_provider": "ib"
             }
+            
+            # Write to cache with option chain data
+            self._write_market_data_cache(symbol, market_data, option_chain_data)
+            
+            return market_data
             
         except Exception as e:
             logger.error(f"Error fetching IB data for {symbol}: {e}")
@@ -180,6 +243,7 @@ class MarketAnalyzer:
             realized_vol = returns.std() * np.sqrt(252) * 100  # Annualized
             
             # Get options chain for IV calculation
+            option_chain_data = []
             try:
                 # Get nearest expiration
                 expirations = await asyncio.to_thread(lambda: ticker.options)
@@ -204,6 +268,18 @@ class MarketAnalyzer:
                     # Store and calculate IV percentile
                     self._store_iv_history(symbol, iv)
                     iv_percentile = self._calculate_iv_percentile(symbol, iv)
+                    
+                    # Prepare option chain data for cache
+                    for _, call_row in calls.iterrows():
+                        put_row = puts[puts['strike'] == call_row['strike']]
+                        option_chain_data.append({
+                            "strike": call_row['strike'],
+                            "call_oi": int(call_row.get('openInterest', 0)),
+                            "put_oi": int(put_row['openInterest'].iloc[0]) if not put_row.empty else 0,
+                            "call_iv": call_row.get('impliedVolatility', 0.20),
+                            "put_iv": put_row['impliedVolatility'].iloc[0] if not put_row.empty else 0.20,
+                            "dte": 0  # Approximate for 0DTE
+                        })
                 else:
                     iv = realized_vol
                     iv_percentile = 50  # Default to middle
@@ -218,7 +294,7 @@ class MarketAnalyzer:
             # Determine gamma environment
             gamma_env = self._determine_gamma_environment(iv_percentile, expected_range_pct)
             
-            return {
+            market_data = {
                 "symbol": symbol,
                 "iv_percentile": round(iv_percentile, 1),
                 "expected_range_pct": round(expected_range_pct, 4),
@@ -231,6 +307,11 @@ class MarketAnalyzer:
                 "data_provider": "yahoo"
             }
             
+            # Write to cache with option chain data
+            self._write_market_data_cache(symbol, market_data, option_chain_data)
+            
+            return market_data
+            
         except Exception as e:
             logger.error(f"Error fetching Yahoo data for {symbol}: {e}")
             raise
@@ -241,18 +322,23 @@ class MarketAnalyzer:
         if symbol == "SPX":
             base_iv = 15.0
             base_range = 0.008
+            base_price = 5950
         elif symbol == "SPY":
             base_iv = 18.0
             base_range = 0.007
+            base_price = 595
         elif symbol == "QQQ":
             base_iv = 22.0
             base_range = 0.012
+            base_price = 490
         elif symbol == "RUT":
             base_iv = 25.0
             base_range = 0.015
+            base_price = 2200
         else:
             base_iv = settings.mock_iv_percentile
             base_range = settings.mock_expected_range_pct
+            base_price = 100
         
         # Simulate time-based variations
         hour = datetime.now().hour
@@ -263,14 +349,37 @@ class MarketAnalyzer:
         iv = base_iv * time_multiplier
         iv_percentile = min(100, iv * 2)  # Simple mock percentile
         
-        return {
+        # Generate mock option chain
+        strikes = [base_price + i * 10 for i in range(-10, 11)]
+        option_chain_data = []
+        for strike in strikes:
+            distance = abs(strike - base_price) / base_price
+            base_oi = int(10000 * np.exp(-distance * 20))
+            option_chain_data.append({
+                "strike": strike,
+                "call_oi": base_oi,
+                "put_oi": base_oi,
+                "call_iv": base_iv / 100 + distance * 0.1,
+                "put_iv": base_iv / 100 + distance * 0.1,
+                "dte": 0
+            })
+        
+        market_data = {
             "symbol": symbol,
             "iv_percentile": iv_percentile,
             "expected_range_pct": base_range * time_multiplier,
             "gamma_environment": self._determine_gamma_environment(iv_percentile, base_range),
+            "current_price": base_price,
+            "implied_vol": iv,
             "analysis_timestamp": datetime.now().isoformat(),
-            "is_mock_data": True
+            "is_mock_data": True,
+            "data_provider": "mock"
         }
+        
+        # Write to cache with option chain data
+        self._write_market_data_cache(symbol, market_data, option_chain_data)
+        
+        return market_data
     
     def _determine_gamma_environment(self, iv_percentile: float, range_pct: float) -> str:
         """Determine gamma environment description."""
