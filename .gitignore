@@ -54,3 +54,5 @@ htmlcov/
 *.tmp
 *.bak
 archive/
+test_*.json
+*_test.json
