@@ -1,0 +1,20 @@
+{
+  "timestamp": "2025-06-16T22:27:20.306935",
+  "source": "mock",
+  "data": {
+    "SPX": {
+      "spot_price": 5950,
+      "implied_vol": 30.0,
+      "iv_percentile": 60.0,
+      "last_updated": "2025-06-16T22:27:16.471646",
+      "option_chain": []
+    },
+    "RUT": {
+      "spot_price": 2200,
+      "implied_vol": 50.0,
+      "iv_percentile": 100,
+      "last_updated": "2025-06-16T22:27:20.306943",
+      "option_chain": []
+    }
+  }
+}
