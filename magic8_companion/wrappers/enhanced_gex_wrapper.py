@@ -1,201 +1,198 @@
 """
-Enhanced GEX wrapper that integrates MLOptionTrading's gamma analysis
-Provides seamless integration between MLOptionTrading and Magic8-Companion
+Enhanced GEX Wrapper for Magic8-Companion
+Integrates with MLOptionTrading's gamma analysis for real-time scoring adjustments
 """
 
-import os
-import sys
 import json
-from pathlib import Path
-from typing import Dict, Optional
-from datetime import datetime, timedelta
 import logging
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class EnhancedGEXWrapper:
     """
-    Wrapper that can use either:
-    1. Direct integration with MLOptionTrading gamma module
-    2. JSON file reading from MLOptionTrading output
+    Wrapper that reads gamma analysis from MLOptionTrading
+    and provides scoring adjustments to Magic8-Companion
     """
     
-    def __init__(self, mode='file', ml_option_path=None):
-        """
-        Initialize enhanced GEX wrapper
+    def __init__(self):
+        """Initialize the enhanced GEX wrapper"""
+        # Find MLOptionTrading data directory
+        self.ml_option_trading_path = self._find_mloptiontrading_path()
+        self.gamma_data_file = self.ml_option_trading_path / "data" / "gamma_adjustments.json"
+        self.full_gamma_file = self.ml_option_trading_path / "data" / "gamma_analysis.json"
         
-        Args:
-            mode: 'integrated' for direct module import or 'file' for JSON reading
-            ml_option_path: Path to MLOptionTrading directory
-        """
-        self.mode = mode
-        self.ml_option_path = ml_option_path or os.getenv('ML_OPTION_TRADING_PATH', '../MLOptionTrading')
-        self.gamma_analyzer = None
+        # Cache settings
+        self.cache_duration_minutes = 5
+        self.last_data = None
+        self.last_read_time = None
         
-        if mode == 'integrated' and self.ml_option_path:
-            try:
-                # Add MLOptionTrading to path
-                sys.path.insert(0, str(Path(self.ml_option_path).resolve()))
-                from analysis.gamma.gamma_exposure import GammaExposureAnalyzer
-                self.gamma_analyzer = GammaExposureAnalyzer()
-                logger.info("Enhanced GEX wrapper initialized in integrated mode")
-            except ImportError as e:
-                logger.warning(f"Failed to import gamma analyzer: {e}")
-                logger.warning("Falling back to file mode")
-                self.mode = 'file'
-        
-        if self.mode == 'file':
-            logger.info("Enhanced GEX wrapper initialized in file mode")
+        logger.info(f"Enhanced GEX wrapper initialized with path: {self.ml_option_trading_path}")
     
-    def get_gamma_adjustments(self, symbol='SPX', max_age_minutes=5) -> Optional[Dict]:
-        """
-        Get gamma adjustments either directly or from file
+    def _find_mloptiontrading_path(self) -> Path:
+        """Find MLOptionTrading installation path"""
+        import os
         
-        Args:
-            symbol: Symbol to get adjustments for (default: SPX)
-            max_age_minutes: Maximum age of data to consider valid
-            
-        Returns:
-            Dictionary with gamma adjustments or None if unavailable
-        """
-        if self.mode == 'integrated' and self.gamma_analyzer:
-            # Direct calculation (future enhancement)
-            logger.debug("Direct gamma calculation not yet implemented")
-            return self._read_gamma_adjustments(max_age_minutes)
-        else:
-            # Read from file
-            return self._read_gamma_adjustments(max_age_minutes)
+        # Try environment variable first
+        if env_path := os.environ.get('MLOPTIONTRADING_PATH'):
+            return Path(env_path)
+        
+        # Try common relative paths
+        possible_paths = [
+            Path("../MLOptionTrading"),  # Side by side
+            Path.home() / "magic8" / "MLOptionTrading",  # Standard location
+            Path(__file__).parent.parent.parent.parent / "MLOptionTrading"  # Relative
+        ]
+        
+        for path in possible_paths:
+            if path.exists() and (path / "gamma_scheduler.py").exists():
+                logger.info(f"Found MLOptionTrading at: {path}")
+                return path
+        
+        # Default path
+        default = Path.home() / "magic8" / "MLOptionTrading"
+        logger.warning(f"MLOptionTrading not found, using default: {default}")
+        return default
     
-    def _read_gamma_adjustments(self, max_age_minutes=5) -> Optional[Dict]:
-        """Read gamma adjustments from MLOptionTrading output"""
-        
-        if not self.ml_option_path:
-            logger.debug("ML Option Trading path not configured")
-            return None
-            
-        adj_file = Path(self.ml_option_path) / 'data' / 'gamma_adjustments.json'
-        
-        if not adj_file.exists():
-            logger.debug(f"Gamma adjustments file not found: {adj_file}")
-            return None
-        
+    def get_gamma_adjustments(self) -> Optional[Dict]:
+        """Get the latest gamma adjustments from MLOptionTrading"""
         try:
-            with open(adj_file, 'r') as f:
-                data = json.load(f)
+            # Check cache
+            if self.last_data and self.last_read_time:
+                age = datetime.now() - self.last_read_time
+                if age < timedelta(minutes=self.cache_duration_minutes):
+                    logger.debug("Using cached gamma data")
+                    return self.last_data
             
-            # Check freshness
-            timestamp = datetime.fromisoformat(data.get('timestamp', ''))
-            age = datetime.now() - timestamp
-            
-            if age > timedelta(minutes=max_age_minutes):
-                logger.debug(f"Gamma data too old: {age}")
+            # Read fresh data
+            if self.gamma_data_file.exists():
+                with open(self.gamma_data_file, 'r') as f:
+                    data = json.load(f)
+                
+                # Check data freshness
+                timestamp = datetime.fromisoformat(data['timestamp'])
+                age = datetime.now() - timestamp
+                
+                if age < timedelta(minutes=30):  # Data is fresh enough
+                    self.last_data = data
+                    self.last_read_time = datetime.now()
+                    logger.debug(f"Loaded gamma data from {age.total_seconds()/60:.1f} minutes ago")
+                    return data
+                else:
+                    logger.warning(f"Gamma data is {age.total_seconds()/60:.0f} minutes old")
+                    return None
+            else:
+                logger.debug("No gamma adjustments file found")
                 return None
                 
-            logger.info(f"Loaded gamma adjustments (age: {age.seconds}s)")
-            return data
-            
         except Exception as e:
             logger.error(f"Error reading gamma adjustments: {e}")
             return None
     
-    def calculate_strategy_adjustments(self, strategy_type: str, gamma_data: Dict) -> int:
-        """
-        Calculate strategy-specific adjustments from gamma data
+    def calculate_strategy_adjustments(self, strategy: str, gamma_data: Dict) -> float:
+        """Calculate scoring adjustments for a specific strategy"""
+        if not gamma_data or 'score_adjustments' not in gamma_data:
+            return 0.0
         
-        Args:
-            strategy_type: Type of strategy (Butterfly, Iron_Condor, Vertical)
-            gamma_data: Gamma analysis data
-            
-        Returns:
-            Score adjustment value
-        """
-        if not gamma_data:
-            return 0
-        
-        # Get base adjustments
         adjustments = gamma_data.get('score_adjustments', {})
-        strategy_adj = adjustments.get(strategy_type, 0)
+        base_adjustment = adjustments.get(strategy, 0)
         
-        # Apply signal strength multiplier if available
-        signals = gamma_data.get('signals', {})
-        if signals.get('signal_strength') == 'strong':
-            strategy_adj = int(strategy_adj * 1.5)
+        # Apply confidence scaling if available
+        if 'confidence' in gamma_data:
+            confidence = gamma_data['confidence']
+            if confidence == 'strong':
+                base_adjustment *= 1.2
+            elif confidence == 'weak':
+                base_adjustment *= 0.8
         
-        # Cap adjustments to reasonable range
-        strategy_adj = max(-20, min(20, strategy_adj))
-        
-        logger.debug(f"{strategy_type} gamma adjustment: {strategy_adj}")
-        return strategy_adj
+        # Cap adjustments at ±20 points
+        return max(-20, min(20, base_adjustment))
     
     def get_gamma_metrics(self, gamma_data: Dict) -> Dict:
-        """
-        Extract key gamma metrics for display/logging
-        
-        Args:
-            gamma_data: Gamma analysis data
-            
-        Returns:
-            Dictionary with formatted metrics
-        """
+        """Extract key gamma metrics for logging"""
         if not gamma_data:
-            return {}
+            return {
+                'regime': 'unknown',
+                'bias': 'neutral',
+                'net_gex': 0,
+                'confidence': 'none'
+            }
         
-        metrics = gamma_data.get('gamma_metrics', {})
-        signals = gamma_data.get('signals', {})
+        # Try to get from the full analysis file for more details
+        try:
+            if self.full_gamma_file.exists():
+                with open(self.full_gamma_file, 'r') as f:
+                    full_data = json.load(f)
+                    
+                return {
+                    'regime': full_data.get('signals', {}).get('gamma_regime', 'unknown'),
+                    'bias': full_data.get('signals', {}).get('bias', 'neutral'),
+                    'net_gex': full_data.get('gamma_metrics', {}).get('net_gex', 0),
+                    'confidence': full_data.get('signals', {}).get('confidence', 'medium'),
+                    'spot_price': full_data.get('spot_price', 0),
+                    'gamma_flip': full_data.get('gamma_metrics', {}).get('gamma_flip', 0),
+                    'call_wall': full_data.get('gamma_metrics', {}).get('call_wall', 0),
+                    'put_wall': full_data.get('gamma_metrics', {}).get('put_wall', 0)
+                }
+        except Exception as e:
+            logger.debug(f"Could not read full gamma data: {e}")
         
+        # Fallback to basic data
         return {
-            'net_gex': metrics.get('net_gex', 0),
-            'gamma_flip': metrics.get('gamma_flip', 0),
-            'call_wall': metrics.get('call_wall', 0),
-            'put_wall': metrics.get('put_wall', 0),
-            'regime': signals.get('gamma_regime', 'unknown'),
-            'bias': signals.get('bias', 'neutral'),
-            'confidence': signals.get('confidence', 'low')
+            'regime': gamma_data.get('gamma_regime', 'unknown'),
+            'bias': 'neutral',
+            'net_gex': 0,
+            'confidence': 'medium'
         }
     
-    def format_gamma_summary(self, gamma_data: Dict) -> str:
-        """
-        Format gamma data into a human-readable summary
+    def get_key_levels(self) -> Optional[Dict]:
+        """Get key gamma levels (walls, flip point)"""
+        gamma_data = self.get_gamma_adjustments()
+        if not gamma_data or 'key_levels' not in gamma_data:
+            return None
         
-        Args:
-            gamma_data: Gamma analysis data
-            
-        Returns:
-            Formatted string summary
-        """
-        if not gamma_data:
-            return "No gamma data available"
-        
-        metrics = self.get_gamma_metrics(gamma_data)
-        
-        return (
-            f"Gamma Analysis Summary:\n"
-            f"  Net GEX: ${metrics['net_gex']:,.0f}\n"
-            f"  Regime: {metrics['regime'].upper()}\n"
-            f"  Gamma Flip: {metrics['gamma_flip']:.0f}\n"
-            f"  Call Wall: {metrics['call_wall']:.0f}\n"
-            f"  Put Wall: {metrics['put_wall']:.0f}\n"
-            f"  Trading Bias: {metrics['bias'].replace('_', ' ').title()}\n"
-            f"  Confidence: {metrics['confidence'].upper()}"
-        )
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Test the wrapper
-    wrapper = EnhancedGEXWrapper(mode='file')
+        return gamma_data['key_levels']
     
-    # Try to get gamma adjustments
-    gamma_data = wrapper.get_gamma_adjustments()
-    
-    if gamma_data:
-        print("Successfully loaded gamma data!")
-        print(wrapper.format_gamma_summary(gamma_data))
+    def is_gamma_analysis_available(self) -> bool:
+        """Check if gamma analysis is available and running"""
+        # Check if MLOptionTrading is installed
+        if not self.ml_option_trading_path.exists():
+            return False
         
-        # Test strategy adjustments
-        for strategy in ['Butterfly', 'Iron_Condor', 'Vertical']:
-            adj = wrapper.calculate_strategy_adjustments(strategy, gamma_data)
-            print(f"{strategy} adjustment: {adj}")
-    else:
-        print("No gamma data available - ensure MLOptionTrading is running")
+        # Check if gamma data exists and is recent
+        if self.gamma_data_file.exists():
+            try:
+                with open(self.gamma_data_file, 'r') as f:
+                    data = json.load(f)
+                timestamp = datetime.fromisoformat(data['timestamp'])
+                age = datetime.now() - timestamp
+                return age < timedelta(hours=1)  # Consider available if updated within an hour
+            except:
+                pass
+        
+        return False
+    
+    def get_status(self) -> Dict:
+        """Get status of gamma analysis integration"""
+        status = {
+            'available': self.is_gamma_analysis_available(),
+            'mloptiontrading_path': str(self.ml_option_trading_path),
+            'data_file_exists': self.gamma_data_file.exists(),
+            'last_update': None,
+            'data_age_minutes': None
+        }
+        
+        if self.gamma_data_file.exists():
+            try:
+                with open(self.gamma_data_file, 'r') as f:
+                    data = json.load(f)
+                timestamp = datetime.fromisoformat(data['timestamp'])
+                status['last_update'] = data['timestamp']
+                status['data_age_minutes'] = (datetime.now() - timestamp).total_seconds() / 60
+            except:
+                pass
+        
+        return status
