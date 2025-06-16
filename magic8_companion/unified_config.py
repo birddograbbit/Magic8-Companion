@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     enable_advanced_gex: bool = False
     enable_volume_analysis: bool = False
     
+    # === GAMMA INTEGRATION SETTINGS (for MLOptionTrading) ===
+    
+    enable_enhanced_gex: bool = True  # Enable enhanced gamma analysis from MLOptionTrading
+    ml_option_trading_path: str = "../MLOptionTrading"  # Path to MLOptionTrading repo
+    gamma_integration_mode: str = "file"  # Mode: file or api
+    gamma_max_age_minutes: int = 5  # Max age for gamma data before refresh
+    
     # === LOGGING CONFIGURATION ===
     
     log_level: str = "INFO"
