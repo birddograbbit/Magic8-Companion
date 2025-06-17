@@ -178,3 +178,116 @@ The system maintains backwards compatibility with MLOptionTrading:
 2. **Historical Analysis**: Store and analyze gamma patterns
 3. **ML Integration**: Use gamma data as ML features
 4. **Real-time Updates**: WebSocket integration for live gamma
+
+---
+
+## Continuation Prompt for Debugging
+
+Use this comprehensive prompt to continue debugging the Enhanced Gamma feature in a new chat session:
+
+```
+I'm working on debugging the Enhanced Gamma feature in Magic8-Companion, which was recently migrated from MLOptionTrading. Here's the complete context:
+
+## Project Overview
+
+I have a three-system architecture for options trading:
+
+1. **Magic8-Companion**: Rule-based strategy scorer (Butterfly, Iron Condor, Vertical)
+   - Repository: https://github.com/birddograbbit/Magic8-Companion.git
+   - Branch: feature/enhanced-gamma-migration (PR #22 open)
+   
+2. **MLOptionTrading**: Original gamma analysis system (being deprecated)
+   - Repository: https://github.com/birddograbbit/MLOptionTrading.git
+   - Status: Gamma feature migrated to Magic8-Companion
+   
+3. **DiscordTrading**: Execution bot that reads Magic8 recommendations
+   - Repository: https://github.com/birddograbbit/DiscordTrading.git
+
+## Current Status (June 17, 2025)
+
+### Completed Migration Tasks
+- ✅ Created `magic8_companion/analysis/gamma/` module structure
+- ✅ Migrated `gamma_exposure.py` with Black-Scholes calculations
+- ✅ Created `gamma_runner.py` using Magic8's data providers
+- ✅ Updated `enhanced_gex_wrapper.py` to use internal analysis
+- ✅ Created `gamma_scheduler.py` for scheduled runs
+- ✅ Updated `simple_gamma_enhancer.py` as integrated version
+- ✅ Added scipy and schedule to requirements.txt
+- ✅ Updated .env.example with gamma configuration
+- ✅ Created migration guide documentation
+
+### Key Files to Check
+
+**Core Gamma Module:**
+- `magic8_companion/analysis/gamma/gamma_exposure.py` - Black-Scholes gamma calculations
+- `magic8_companion/analysis/gamma/gamma_runner.py` - Integrated analysis runner
+- `magic8_companion/wrappers/enhanced_gex_wrapper.py` - Updated wrapper
+
+**Integration Points:**
+- `simple_gamma_enhancer.py` - Standalone enhancer for testing
+- `gamma_scheduler.py` - Scheduled runner
+- `magic8_companion/modules/unified_combo_scorer.py` - Where gamma integrates with scoring
+
+**Configuration:**
+- `.env.example` - Reference configuration
+- `.env` - Actual configuration (not in repo)
+
+### Expected Behavior
+
+When working correctly, the system should:
+
+1. Calculate dealer gamma exposure (GEX) for SPX options
+2. Identify key levels: gamma flip, call wall, put wall
+3. Apply score adjustments based on gamma regime:
+   - Positive gamma: Butterfly +15, Iron Condor +10, Vertical -5
+   - Negative gamma: Vertical +10, others neutral/negative
+4. Save results to `data/gamma/gamma_analysis.json`
+5. Integrate adjustments into Magic8 recommendations
+
+### Current Issues to Debug
+
+1. Verify gamma analysis runs successfully with live market data
+2. Confirm score adjustments are being applied correctly
+3. Check if gamma data files are created and updated
+4. Ensure backwards compatibility with MLOptionTrading files
+5. Test scheduler runs at correct times
+
+### Testing Commands
+
+```bash
+# Switch to feature branch
+cd ~/magic8/Magic8-Companion
+git checkout feature/enhanced-gamma-migration
+
+# Test gamma analysis
+python -c "from magic8_companion.analysis.gamma.gamma_runner import run_gamma_analysis; import json; print(json.dumps(run_gamma_analysis('SPX'), indent=2))"
+
+# Test simple enhancer
+python simple_gamma_enhancer.py
+
+# Check gamma data
+cat data/gamma/gamma_analysis.json | jq '.'
+
+# Run full system
+python -m magic8_companion
+```
+
+### Environment Variables
+
+Key settings in .env:
+- M8C_ENABLE_ENHANCED_GEX=true
+- M8C_SYSTEM_COMPLEXITY=enhanced
+- M8C_DATA_PROVIDER=yahoo
+- M8C_GAMMA_SYMBOLS=SPX
+
+### Common Error Patterns
+
+1. "No option data available" - Data provider issue or market closed
+2. ImportError for scipy - Need to run pip install -r requirements.txt
+3. Empty gamma_analysis.json - Check data provider configuration
+4. Zero adjustments - Verify gamma calculations are running
+
+Please help me debug any issues with the gamma integration and ensure it's working correctly in production.
+```
+
+This prompt contains all necessary context for continuing the debugging process in a new chat session.
