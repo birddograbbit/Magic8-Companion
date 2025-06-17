@@ -63,7 +63,13 @@ pip install -r requirements.txt
 ### 2. Configuration
 
 #### Magic8-Companion (.env)
+
+**CRITICAL**: You must set the system complexity mode to use IBKR data!
+
 ```bash
+# CRITICAL: Set system complexity mode (simple uses mock data)
+M8C_SYSTEM_COMPLEXITY=enhanced  # REQUIRED for IBKR data!
+
 # Core Settings
 M8C_OUTPUT_FILE_PATH=data/recommendations.json
 M8C_SUPPORTED_SYMBOLS=["SPX", "SPY", "QQQ", "NDX", "RUT"]
@@ -73,16 +79,18 @@ M8C_MIN_SCORE_GAP=15
 
 # Market Data
 M8C_USE_MOCK_DATA=false
-M8C_MARKET_DATA_PROVIDER=yahoo  # Options: yahoo, ib, polygon
+M8C_MARKET_DATA_PROVIDER=ib  # Options: yahoo, ib, polygon
 
 # Enhanced Features
 M8C_ENABLE_ENHANCED_INDICATORS=false  # Keep false for gamma-only
 M8C_ENABLE_GAMMA_INTEGRATION=true
 
 # IBKR Settings (if using IB data)
-M8C_IB_HOST=127.0.0.1
-M8C_IB_PORT=7497
-M8C_IB_CLIENT_ID=2
+M8C_USE_IBKR_DATA=true
+M8C_IBKR_HOST=127.0.0.1
+M8C_IBKR_PORT=7497  # 7497 for paper, 7496 for live
+M8C_IBKR_CLIENT_ID=111
+M8C_IBKR_FALLBACK_TO_YAHOO=true
 
 # Paths
 M8C_GAMMA_ADJUSTMENTS_PATH=../MLOptionTrading/data/gamma_adjustments.json
@@ -135,8 +143,9 @@ python gamma_scheduler.py --mode scheduled
 ```bash
 cd ~/magic8/Magic8-Companion
 source .venv/bin/activate
-./start_magic8_enhanced.sh
-# Or: python -m magic8_companion
+# IMPORTANT: Use this command format
+python -m magic8_companion
+# DO NOT use: python -m magic8_companion.main
 ```
 
 #### Terminal 3: Discord Trading (Optional)
@@ -205,6 +214,12 @@ The gamma integration provides the following scoring adjustments:
 
 ### Common Issues and Solutions
 
+#### "Using cached MOCK data" despite IBKR configuration
+**Solution**: Add `M8C_SYSTEM_COMPLEXITY=enhanced` to your .env file
+- The system defaults to "standard" mode
+- Only "enhanced" mode uses real market data with IBKR
+- "simple" mode always uses mock data
+
 #### "No gamma adjustments found"
 ```bash
 # Check if gamma analysis is running
@@ -246,6 +261,11 @@ netstat -an | grep 7497  # Should show LISTENING
 - Use fallback values in configuration
 
 ## Important Configuration Notes
+
+### System Complexity Modes
+- **simple**: Uses mock data only, basic features
+- **standard**: Production features, but may still use mock data
+- **enhanced**: Full features with IBKR data integration (RECOMMENDED)
 
 ### SPX vs SPXW Options
 - IBKR uses "SPXW" for weekly SPX options
@@ -318,4 +338,4 @@ tmux attach -t magic8  # Attach to specific session
 ---
 
 Last Updated: June 2025
-Version: Post-cleanup with Gamma Integration
+Version: Post-cleanup with Gamma Integration - Fixed IBKR data issue
