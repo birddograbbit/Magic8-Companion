@@ -1,148 +1,189 @@
-#!/usr/bin/env python3
 """
-Gamma Analysis Scheduler for Magic8-Companion
-Runs integrated gamma analysis on schedule
+Gamma Scheduler for Magic8-Companion.
+Schedules and runs gamma analysis at specified times or intervals.
 """
-
-import os
-import sys
-import time
 import logging
 import schedule
+import time
+import argparse
+import signal
+import sys
 from datetime import datetime
-import pytz
-from pathlib import Path
+from typing import List, Dict, Optional
 
-from magic8_companion.analysis.gamma.gamma_runner import run_gamma_analysis
-from magic8_companion.config import get_config
+from magic8_companion.analysis.gamma.gamma_runner import run_gamma_analysis, run_batch_gamma_analysis
+from magic8_companion.unified_config import settings
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
 class GammaScheduler:
-    """Schedules and runs gamma analysis"""
+    """Scheduler for running gamma analysis at specified times."""
     
-    def __init__(self):
-        self.config = get_config()
-        self.symbols = self.config.get('M8C_GAMMA_SYMBOLS', ['SPX']).split(',')
-        logger.info(f"Gamma scheduler initialized for symbols: {self.symbols}")
+    def __init__(self, mode: str = "scheduled", symbols: Optional[List[str]] = None):
+        """
+        Initialize gamma scheduler.
+        
+        Args:
+            mode: 'scheduled' for specific times, 'interval' for regular intervals
+            symbols: List of symbols to analyze. Uses settings if None.
+        """
+        self.mode = mode
+        self.symbols = symbols or settings.gamma_symbols
+        self.running = False
+        self._setup_signal_handlers()
+        
+    def _setup_signal_handlers(self):
+        """Setup graceful shutdown handlers."""
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals."""
+        logger.info("Received shutdown signal, stopping scheduler...")
+        self.running = False
+        sys.exit(0)
     
     def run_analysis(self):
-        """Run gamma analysis for all configured symbols"""
-        try:
-            logger.info("Running scheduled gamma analysis")
-            
-            for symbol in self.symbols:
-                logger.info(f"Analyzing {symbol}")
-                results = run_gamma_analysis(symbol)
-                
-                if results:
-                    logger.info(f"{symbol} analysis completed successfully")
-                    
-                    # Log key metrics
-                    logger.info(f"  Net GEX: ${results['gamma_metrics']['net_gex']:,.0f}")
-                    logger.info(f"  Gamma Regime: {results['signals']['gamma_regime']}")
-                    logger.info(f"  Market Bias: {results['signals']['bias']}")
-                else:
-                    logger.error(f"{symbol} analysis failed")
-                    
-        except Exception as e:
-            logger.error(f"Error in scheduled analysis: {e}")
-    
-    def run_continuous(self, interval_minutes=5):
-        """Run analysis continuously with specified interval"""
-        logger.info(f"Running gamma analysis every {interval_minutes} minutes")
+        """Run gamma analysis for all configured symbols."""
+        logger.info(f"Running scheduled gamma analysis at {datetime.now()}")
         
-        while True:
-            try:
-                self.run_analysis()
-                time.sleep(interval_minutes * 60)
-            except KeyboardInterrupt:
-                logger.info("Stopping continuous analysis")
-                break
-            except Exception as e:
-                logger.error(f"Error in continuous mode: {e}")
-                time.sleep(60)  # Wait a minute before retrying
+        results = run_batch_gamma_analysis(self.symbols)
+        
+        # Log summary
+        for symbol, result in results.items():
+            if result:
+                net_gex = result.get('net_gex', 0)
+                regime = result.get('regime', 'unknown')
+                logger.info(f"{symbol}: Net GEX ${net_gex:,.0f}, Regime: {regime}")
+            else:
+                logger.warning(f"{symbol}: Analysis failed")
+        
+        return results
     
-    def run_scheduled(self, times=None):
-        """Run analysis on schedule"""
-        # Define Eastern timezone and local timezone
-        et = pytz.timezone('America/New_York')
-        local_tz = datetime.now().astimezone().tzinfo
-
-        # Default schedule times in Eastern Time (matching Magic8-Companion)
-        if times is None:
-            schedule_times_et = ['10:30', '11:00', '12:30', '14:45']
+    def schedule_jobs(self):
+        """Schedule gamma analysis jobs based on mode."""
+        if self.mode == "scheduled":
+            # Schedule at specific times
+            for time_str in settings.gamma_scheduler_times:
+                schedule.every().day.at(time_str).do(self.run_analysis)
+                logger.info(f"Scheduled gamma analysis at {time_str}")
+        
+        elif self.mode == "interval":
+            # Schedule at regular intervals
+            interval_minutes = settings.gamma_scheduler_interval
+            schedule.every(interval_minutes).minutes.do(self.run_analysis)
+            logger.info(f"Scheduled gamma analysis every {interval_minutes} minutes")
+        
         else:
-            schedule_times_et = times
-
-        logger.info(
-            f"Scheduling gamma analysis at: {', '.join(schedule_times_et)} ET"
-        )
-
-        # Convert ET times to local timezone strings for schedule module
-        local_schedule_times = []
-        today = datetime.now(et)
-        for time_str in schedule_times_et:
-            hour, minute = map(int, time_str.split(':'))
-            et_dt = et.localize(
-                datetime(today.year, today.month, today.day, hour, minute)
-            )
-            local_dt = et_dt.astimezone(local_tz)
-            local_schedule_times.append(local_dt.strftime('%H:%M'))
-
-        for local_time in local_schedule_times:
-            schedule.every().day.at(local_time).do(self.run_analysis)
+            raise ValueError(f"Unknown scheduler mode: {self.mode}")
+    
+    def start(self):
+        """Start the scheduler."""
+        logger.info(f"Starting gamma scheduler in {self.mode} mode")
+        logger.info(f"Analyzing symbols: {', '.join(self.symbols)}")
         
-        # Run once on startup if within market hours
-        now_et = datetime.now(et)
-        if 9 <= now_et.hour <= 16:
-            logger.info("Running initial analysis")
-            self.run_analysis()
+        # Schedule jobs
+        self.schedule_jobs()
         
-        # Keep running
-        while True:
+        # Run once immediately
+        self.run_analysis()
+        
+        # Start scheduler loop
+        self.running = True
+        while self.running:
             try:
                 schedule.run_pending()
-                time.sleep(30)  # Check every 30 seconds
-            except KeyboardInterrupt:
-                logger.info("Stopping scheduled analysis")
-                break
+                time.sleep(1)
             except Exception as e:
-                logger.error(f"Error in scheduled mode: {e}")
-                time.sleep(60)
+                logger.error(f"Error in scheduler loop: {e}", exc_info=True)
+                time.sleep(10)  # Wait before retrying
+    
+    def stop(self):
+        """Stop the scheduler."""
+        logger.info("Stopping gamma scheduler")
+        self.running = False
 
 
 def main():
-    """Main entry point"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Gamma Analysis Scheduler')
-    parser.add_argument('--mode', choices=['scheduled', 'continuous', 'once'], 
-                       default='once', help='Run mode')
-    parser.add_argument('--interval', type=int, default=5,
-                       help='Interval in minutes for continuous mode')
-    parser.add_argument('--times', type=str,
-                       help='Comma-separated times for scheduled mode (e.g., "10:30,14:45")')
+    """Main entry point for gamma scheduler."""
+    parser = argparse.ArgumentParser(description="Gamma Analysis Scheduler")
+    parser.add_argument(
+        "--mode",
+        choices=["scheduled", "interval"],
+        default=settings.gamma_scheduler_mode,
+        help="Scheduler mode: scheduled (specific times) or interval (regular intervals)"
+    )
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        help="Symbols to analyze (default: from settings)"
+    )
+    parser.add_argument(
+        "--times",
+        nargs="+",
+        help="Times to run analysis (for scheduled mode, format: HH:MM)"
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        help="Interval in minutes (for interval mode)"
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level"
+    )
+    parser.add_argument(
+        "--run-once",
+        action="store_true",
+        help="Run analysis once and exit"
+    )
     
     args = parser.parse_args()
     
-    scheduler = GammaScheduler()
+    # Configure logging
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('logs/gamma_scheduler.log')
+        ]
+    )
     
-    logger.info(f"Starting Gamma Analysis Scheduler in {args.mode} mode")
+    # Override settings if provided
+    if args.times and args.mode == "scheduled":
+        settings.gamma_scheduler_times = args.times
     
-    if args.mode == 'once':
-        scheduler.run_analysis()
-    elif args.mode == 'continuous':
-        scheduler.run_continuous(args.interval)
-    elif args.mode == 'scheduled':
-        times = args.times.split(',') if args.times else None
-        scheduler.run_scheduled(times)
+    if args.interval and args.mode == "interval":
+        settings.gamma_scheduler_interval = args.interval
+    
+    # Run once if requested
+    if args.run_once:
+        logger.info("Running gamma analysis once")
+        results = run_batch_gamma_analysis(args.symbols)
+        for symbol, result in results.items():
+            if result:
+                print(f"{symbol}: Success")
+            else:
+                print(f"{symbol}: Failed")
+        return
+    
+    # Create and start scheduler
+    scheduler = GammaScheduler(
+        mode=args.mode,
+        symbols=args.symbols
+    )
+    
+    try:
+        scheduler.start()
+    except KeyboardInterrupt:
+        logger.info("Scheduler interrupted by user")
+    except Exception as e:
+        logger.error(f"Scheduler error: {e}", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
