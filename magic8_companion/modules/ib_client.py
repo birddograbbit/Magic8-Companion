@@ -26,7 +26,11 @@ class IBClient:
                     await self.ib.connectAsync(self.host, self.port, clientId=self.client_id, timeout=10)
                     print("Successfully connected to IB.")
                     # Initialize OI fetcher after successful connection
-                    self.oi_fetcher = IBOpenInterestFetcher(self.ib)
+                    if settings.enable_oi_streaming:
+                        self.oi_fetcher = IBOpenInterestFetcher(self.ib)
+                        logger.info("OI streaming enabled")
+                    else:
+                        logger.info("OI streaming disabled by configuration")
                 except asyncio.TimeoutError:
                     print(f"Timeout connecting to IB on {self.host}:{self.port}. Please ensure TWS/Gateway is running and API connections are enabled.")
                 except ConnectionRefusedError:
@@ -289,8 +293,8 @@ class IBClient:
                 symbol_options_data.append(option_data)
                 symbol_contracts.append(contract)
 
-            # Enhance with OI data if we have an OI fetcher
-            if self.oi_fetcher and symbol_options_data:
+            # Enhance with OI data if we have an OI fetcher and it's enabled
+            if self.oi_fetcher and settings.enable_oi_streaming and symbol_options_data:
                 try:
                     logger.info(f"Fetching OI data for {len(symbol_contracts)} {symbol_name} contracts...")
                     symbol_options_data = await self.oi_fetcher.enhance_options_with_oi(
@@ -299,6 +303,9 @@ class IBClient:
                 except Exception as e:
                     logger.error(f"Failed to fetch OI data for {symbol_name}: {e}")
                     # Continue with 0 OI values rather than failing completely
+            else:
+                if not settings.enable_oi_streaming:
+                    logger.info("OI streaming disabled - using default OI values of 0")
 
             options_data.extend(symbol_options_data)
 
