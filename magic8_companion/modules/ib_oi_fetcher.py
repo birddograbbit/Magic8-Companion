@@ -3,7 +3,7 @@ IBKR Open Interest Fetcher
 Handles streaming OI data which cannot be obtained via snapshots
 """
 import math
-import time
+import asyncio
 from typing import Dict, List, Optional
 from ib_async import IB, Contract, Option
 import logging
@@ -32,8 +32,9 @@ class IBOpenInterestFetcher:
         
         try:
             # Start streaming requests for OI
+            # NOTE: ib_async uses reqMktData, not reqMktDataAsync
             for contract in contracts:
-                ticker = await self.ib.reqMktDataAsync(
+                ticker = self.ib.reqMktData(
                     contract, 
                     genericTickList=OI_GENERIC_TICKS, 
                     snapshot=False
@@ -51,28 +52,36 @@ class IBOpenInterestFetcher:
                     # Extract OI based on option type
                     if hasattr(ticker.contract, 'right'):
                         if ticker.contract.right == "C":
+                            # Check various possible attribute names
                             oi_value = (
                                 getattr(ticker, 'callOpenInterest', 0) or 
-                                getattr(ticker, 'openInterest', 0) or 0
+                                getattr(ticker, 'openInterest', 0) or 
+                                getattr(ticker, 'lastGreeks', {}).get('openInterest', 0) or 0
                             )
                         else:
                             oi_value = (
                                 getattr(ticker, 'putOpenInterest', 0) or 
-                                getattr(ticker, 'openInterest', 0) or 0
+                                getattr(ticker, 'openInterest', 0) or 
+                                getattr(ticker, 'lastGreeks', {}).get('openInterest', 0) or 0
                             )
+                    
+                    # Log what we're seeing for debugging
+                    if hasattr(ticker, '__dict__'):
+                        logger.debug(f"Ticker attributes for {ticker.contract.strike} {ticker.contract.right}: {list(ticker.__dict__.keys())}")
                     
                     if oi_value and not math.isnan(oi_value):
                         oi_data[ticker.contract.conId] = int(oi_value)
+                        logger.info(f"Got OI {oi_value} for {ticker.contract.strike} {ticker.contract.right}")
             
             logger.info(f"Successfully retrieved OI data for {len(oi_data)} contracts")
             
         except Exception as e:
-            logger.error(f"Error getting OI data via streaming: {e}")
+            logger.error(f"Error getting OI data via streaming: {e}", exc_info=True)
         finally:
             # Cancel all streaming subscriptions
             for ticker in streaming_tickers:
                 try:
-                    await self.ib.cancelMktDataAsync(ticker.contract)
+                    self.ib.cancelMktData(ticker.contract)
                 except:
                     pass
         
@@ -98,5 +107,3 @@ class IBOpenInterestFetcher:
                 logger.debug(f"Added OI {oi_value} to contract {conid}")
                     
         return options
-
-import asyncio  # Add this import at the top
