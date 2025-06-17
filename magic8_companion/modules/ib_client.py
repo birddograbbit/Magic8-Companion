@@ -2,6 +2,9 @@ import asyncio
 from typing import List, Dict, Optional
 from ib_async import IB, Stock, Option, MarketOrder, Contract, util, Position, OptionChain, Ticker, Index
 from ..unified_config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 class IBClient:
     def __init__(self, host: str = settings.ib_host, port: int = settings.ib_port, client_id: int = settings.ib_client_id):
@@ -33,7 +36,6 @@ class IBClient:
             if not self.ib.isConnected():
                 # Raise an exception if we couldn't connect, so calling functions know.
                 raise ConnectionError("Failed to connect to IB or not currently connected.")
-
 
     async def disconnect(self):
         if self.ib.isConnected():
@@ -68,13 +70,111 @@ class IBClient:
                 })
         return positions_data
 
+    async def qualify_underlying_with_fallback(self, symbol_name: str) -> Optional[Contract]:
+        """Try multiple symbol variations and exchanges to qualify underlying contract."""
+        # Symbol variations to try (e.g., SPX -> SPXW for 0DTE)
+        symbol_variations = {
+            'SPX': ['SPX', 'SPXW'],
+            'RUT': ['RUT'],
+            'SPY': ['SPY'],
+            'QQQ': ['QQQ'],
+            'IWM': ['IWM']
+        }.get(symbol_name, [symbol_name])
+        
+        # Exchange preferences
+        exchange_map = {
+            'SPX': ['SMART', 'CBOE'],
+            'SPXW': ['SMART', 'CBOE'],
+            'RUT': ['SMART', 'CBOE', 'RUSSELL'],
+            'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS'],
+            'QQQ': ['SMART', 'NASDAQ', 'CBOE'],
+            'IWM': ['SMART', 'ARCA', 'CBOE']
+        }
+        
+        for sym_variant in symbol_variations:
+            exchanges = exchange_map.get(sym_variant, ['SMART'])
+            
+            for exchange in exchanges:
+                try:
+                    # Create appropriate contract type
+                    if symbol_name in ['SPX', 'RUT']:
+                        underlying_contract = Index(sym_variant, exchange, 'USD')
+                    else:
+                        underlying_contract = Stock(sym_variant, exchange, 'USD')
+                    
+                    # Try to qualify
+                    qualified = await self.ib.qualifyContractsAsync(underlying_contract)
+                    if qualified and qualified[0].conId:
+                        logger.info(f"Qualified {symbol_name} as {sym_variant} on {exchange}")
+                        return qualified[0]
+                    
+                except Exception as e:
+                    logger.debug(f"Failed to qualify {sym_variant} on {exchange}: {e}")
+                    continue
+        
+        logger.error(f"Failed to qualify {symbol_name} with any symbol/exchange combination")
+        return None
+
+    async def qualify_option_with_fallback(self, symbol_name: str, expiry_date: str, strike: float, right: str, trading_class: str = None) -> Optional[Contract]:
+        """Try multiple symbols and exchanges to qualify option contract."""
+        # For SPX, try both SPX and SPXW symbols
+        symbol_variations = {
+            'SPX': ['SPXW', 'SPX'],  # Prefer SPXW for 0DTE
+            'RUT': ['RUT'],
+            'SPY': ['SPY'],
+            'QQQ': ['QQQ'],
+            'IWM': ['IWM']
+        }.get(symbol_name, [symbol_name])
+        
+        # Exchange preferences - prioritize SMART
+        exchange_map = {
+            'SPX': ['SMART', 'CBOE'],
+            'SPXW': ['SMART', 'CBOE'],
+            'RUT': ['SMART', 'CBOE', 'RUSSELL'],
+            'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS', 'AMEX', 'ISE'],
+            'QQQ': ['SMART', 'NASDAQ', 'CBOE', 'ARCA'],
+            'IWM': ['SMART', 'ARCA', 'CBOE']
+        }
+        
+        for sym_variant in symbol_variations:
+            exchanges = exchange_map.get(sym_variant, ['SMART'])
+            
+            for exchange in exchanges:
+                try:
+                    # Create option contract
+                    opt_contract = Option(
+                        symbol=sym_variant,
+                        lastTradeDateOrContractMonth=expiry_date,
+                        strike=strike,
+                        right=right,
+                        exchange=exchange,
+                        currency='USD'
+                    )
+                    
+                    # Set trading class if provided (e.g., SPXW)
+                    if trading_class:
+                        opt_contract.tradingClass = trading_class
+                    elif sym_variant == 'SPXW':
+                        opt_contract.tradingClass = 'SPXW'
+                    
+                    # Try to qualify
+                    qualified = await self.ib.qualifyContractsAsync(opt_contract)
+                    if qualified and qualified[0].conId:
+                        if sym_variant != symbol_name or exchange != 'CBOE':
+                            logger.info(f"Qualified {symbol_name} option as {sym_variant} {strike} {right} on {exchange}")
+                        return qualified[0]
+                    
+                except Exception as e:
+                    logger.debug(f"Failed to qualify {sym_variant} {strike} {right} on {exchange}: {e}")
+                    continue
+        
+        logger.warning(f"Failed to qualify {symbol_name} {strike} {right} option with any symbol/exchange combination")
+        return None
+
     async def get_atm_options(self, symbols: List[str], days_to_expiry: int = 0) -> List[Dict]:
         """
         Return basic option data for ATM options for the given symbols and DTE.
-        Note: Getting precise ATM options and their full data (esp. IV for 0DTE)
-        can be complex and might require multiple requests or streaming data.
-        This is a simplified version for MVP.
-        For 0DTE, lastTradeDateOrContractMonth should be today's date.
+        Enhanced with symbol/exchange fallback logic for better contract qualification.
         """
         await self._ensure_connected()
         options_data = []
@@ -83,97 +183,85 @@ class IBClient:
             return options_data
 
         # For 0DTE, expiry date is today. Format: YYYYMMDD
-        # This needs to be adjusted for actual trading days / holidays.
-        # For simplicity, using util.current_yyyymmdd might not be robust for all cases (e.g. weekends, holidays for non-SPX options)
-        # SPX 0DTE options trade on their listed expiry date.
         from datetime import datetime
         expiry_date = datetime.now().strftime('%Y%m%d')
 
-
         for symbol_name in symbols:
-            # First, get current price of underlying to determine ATM strikes
-            underlying_contract = Stock(symbol_name, 'SMART', 'USD') # Assuming SMART exchange
-            # Qualify contract for SPX to avoid ambiguity if needed, e.g. for index options
-            if symbol_name == "SPX":
-                 underlying_contract = Index(symbol_name, 'CBOE', 'USD')
+            # Get current price of underlying with fallback
+            underlying_contract = await self.qualify_underlying_with_fallback(symbol_name)
+            
+            if not underlying_contract:
+                logger.error(f"Could not qualify underlying for {symbol_name}")
+                continue
 
-
-            await self.ib.qualifyContractsAsync(underlying_contract)
-
+            # Get spot price
             tickers: List[Ticker] = await self.ib.reqTickersAsync(underlying_contract)
-            await asyncio.sleep(0.1) # Give some time for ticker data to arrive, though reqTickersAsync should await it.
+            await asyncio.sleep(0.1)
 
             spot_price = None
             if tickers and tickers[0] and (tickers[0].marketPrice() or tickers[0].close):
-                spot_price = tickers[0].marketPrice() if tickers[0].marketPrice() else tickers[0].close # marketPrice might be NaN outside RTH
-                if not spot_price or spot_price <= 0 or str(spot_price) == 'nan': # check for NaN
+                spot_price = tickers[0].marketPrice() if tickers[0].marketPrice() else tickers[0].close
+                if not spot_price or spot_price <= 0 or str(spot_price) == 'nan':
                     print(f"Could not get valid spot price for {symbol_name}, using placeholder 5000")
-                    spot_price = 5000 # Fallback, not ideal
+                    spot_price = 5000
             else:
                 print(f"Could not get spot price for {symbol_name}, using placeholder 5000")
-                spot_price = 5000 # Fallback, not ideal
+                spot_price = 5000
 
-            # Determine ATM strikes (e.g., +/- N strikes around spot_price)
-            # This is highly simplified. A real implementation would need more robust strike selection.
-            atm_strike = round(spot_price / 5) * 5  # Example: round to nearest 5 for SPX
+            # Determine ATM strikes
+            if symbol_name in ['SPX', 'SPXW']:
+                atm_strike = round(spot_price / 5) * 5  # Round to nearest 5
+            elif symbol_name == 'SPY':
+                atm_strike = round(spot_price)  # Round to nearest 1
+            else:
+                atm_strike = round(spot_price / 5) * 5  # Default to 5
 
-            # Fetch option chain for a range of strikes around ATM
-            # For 0DTE, this can be very specific.
-            # The guide asks for "ATM options only".
-            # Getting option chains and then filtering can be slow.
-            # A more direct approach for specific strikes might be better if possible.
+            # Get a few strikes around ATM
+            strike_increment = 5 if symbol_name in ['SPX', 'SPXW', 'RUT'] else 1
+            strikes_to_check = [
+                atm_strike - 2 * strike_increment,
+                atm_strike - strike_increment,
+                atm_strike,
+                atm_strike + strike_increment,
+                atm_strike + 2 * strike_increment
+            ]
 
-            # Let's try to get a few strikes around ATM.
-            # For SPX, strikes are usually in 5-point increments.
-            strikes_to_check = [atm_strike - 10, atm_strike - 5, atm_strike, atm_strike + 5, atm_strike + 10]
-
-            option_contracts_to_query = []
+            qualified_options = []
+            
+            # Qualify options with fallback
             for strike in strikes_to_check:
                 for right in ['C', 'P']:
-                    # For SPX index options, the exchange is CBOE.
-                    # For other stock options, it might be different (e.g. SMART)
-                    exchange = 'CBOE' if symbol_name == "SPX" else 'SMART'
-                    opt_contract = Option(symbol_name, expiry_date, strike, right, exchange, tradingClass=symbol_name)
-                    option_contracts_to_query.append(opt_contract)
-
-            if not option_contracts_to_query:
-                continue
-
-            try:
-                qualified_options = await self.ib.qualifyContractsAsync(*option_contracts_to_query)
-            except Exception as e:
-                print(f"Error qualifying option contracts for {symbol_name}: {e}")
-                continue
+                    qualified_opt = await self.qualify_option_with_fallback(
+                        symbol_name, expiry_date, strike, right,
+                        trading_class=underlying_contract.tradingClass if hasattr(underlying_contract, 'tradingClass') else None
+                    )
+                    if qualified_opt:
+                        qualified_options.append(qualified_opt)
 
             if not qualified_options:
                 print(f"No qualified option contracts found for {symbol_name} and strikes {strikes_to_check} for expiry {expiry_date}")
                 continue
 
-            # Request market data for these options
-            # We need bid, ask, and impliedVolatility
-            # Using reqTickersAsync for simplicity, though reqMktData with snapshots might be better for non-streaming.
-            # For IV, tick type 24 (Generic Tick Tags) often contains 'IV'.
-            # Or, use modelOptionComputation if available for specific contracts.
-
+            # Request market data for qualified options
             tickers_for_options: List[Ticker] = await self.ib.reqTickersAsync(*qualified_options)
 
             for ticker in tickers_for_options:
                 contract: Contract = ticker.contract
-                # Implied Volatility might be in ticker.modelGreeks or ticker.impliedVolatility if available directly
-                # This part is tricky and highly dependent on TWS version and data subscriptions.
-                # modelGreeks are often available if option computation is enabled.
+                # Get implied volatility
                 iv = None
                 if ticker.modelGreeks and ticker.modelGreeks.impliedVol is not None and not str(ticker.modelGreeks.impliedVol) == 'nan':
                     iv = ticker.modelGreeks.impliedVol
-                elif ticker.impliedVolatility is not None and not str(ticker.impliedVolatility) == 'nan': # Less common for reqTickers
+                elif ticker.impliedVolatility is not None and not str(ticker.impliedVolatility) == 'nan':
                     iv = ticker.impliedVolatility
 
-                # If IV is still None, we might try to calculate it if we have option price and underlying price
-                # This is out of scope for "lightweight" market_analysis module's direct IB call.
-                # The market_analysis module itself might do this using py_vollib_vectorized if needed.
+                # Get open interest if available
+                open_interest = getattr(ticker, 'openInterest', None)
+                if open_interest is not None and str(open_interest) == 'nan':
+                    open_interest = None
 
                 options_data.append({
-                    'symbol': contract.symbol,
+                    'symbol': symbol_name,  # Use original symbol name
+                    'underlying_symbol': contract.symbol,  # Actual qualified symbol (might be SPXW)
                     'conId': contract.conId,
                     'strike': contract.strike,
                     'right': contract.right,
@@ -181,7 +269,8 @@ class IBClient:
                     'bid': ticker.bid if ticker.bid != -1 else None,
                     'ask': ticker.ask if ticker.ask != -1 else None,
                     'implied_volatility': iv,
-                    'underlying_price_at_fetch': spot_price # For context
+                    'open_interest': open_interest,
+                    'underlying_price_at_fetch': spot_price
                 })
 
         return options_data
