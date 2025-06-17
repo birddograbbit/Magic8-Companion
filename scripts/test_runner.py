@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 Magic8 Trading System - Unified Test Runner
-A single interface for all testing needs
+A single interface for all testing needs.
+
+The runner now derives project paths from the script location or an optional
+``MAGIC8_ROOT`` environment variable. Set ``MAGIC8_ROOT`` if your project lives
+outside the default directory layout.
 """
 import os
 import sys
@@ -48,9 +52,16 @@ class Magic8TestRunner:
     """Unified test runner for Magic8 trading system"""
     
     def __init__(self):
-        self.project_root = Path("/Users/jt/magic8")
-        self.magic8_path = self.project_root / "Magic8-Companion"
-        self.discord_path = self.project_root / "DiscordTrading"
+        env_root = os.environ.get("MAGIC8_ROOT")
+        if env_root:
+            self.project_root = Path(env_root).expanduser()
+        else:
+            # Assume this script lives in <root>/scripts and use that
+            self.project_root = Path(__file__).resolve().parents[1]
+
+        self.magic8_path = self.project_root
+        # DiscordTrading expected alongside Magic8-Companion
+        self.discord_path = self.project_root.parent / "DiscordTrading"
         
     def check_environment(self):
         """Check if the environment is properly set up"""

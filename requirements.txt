@@ -29,6 +29,7 @@ scikit-learn==1.5.2  # For data analysis
 
 # Async HTTP for future API calls
 aiohttp==3.11.11
+aiofiles==24.1.0
 requests==2.32.3
 
 # Performance & Caching

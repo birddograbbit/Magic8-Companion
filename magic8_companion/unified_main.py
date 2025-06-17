@@ -103,11 +103,8 @@ class RecommendationEngine:
             confidence = self._determine_confidence(score)
             
             # Determine if this strategy should be traded
-            # Use MORE LENIENT requirements based on confidence and score
-            should_trade = (
-                confidence == "HIGH" or 
-                (confidence == "MEDIUM" and score >= settings.min_recommendation_score)
-            )
+            # Only HIGH confidence trades are executed to match documentation
+            should_trade = confidence == "HIGH"
             
             strategies[strategy] = {
                 "score": round(score, 1),
