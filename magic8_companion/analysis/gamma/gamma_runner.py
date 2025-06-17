@@ -1,248 +1,215 @@
 """
-Integrated Gamma Analysis Runner for Magic8-Companion
-Runs gamma analysis using Magic8's own data providers
+Gamma Runner for Magic8-Companion.
+Main entry point for running gamma analysis on symbols.
 """
-
-import json
 import logging
+import json
+import os
+from typing import Dict, Optional, List
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, Optional
+import sys
 
-from magic8_companion.analysis.gamma import GammaExposureAnalyzer
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+
 from magic8_companion.data_providers import get_provider
-from magic8_companion.config import get_config
+from magic8_companion.analysis.gamma import (
+    GammaExposureCalculator,
+    GammaLevels,
+    MarketRegimeAnalyzer
+)
+from magic8_companion.unified_config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class IntegratedGammaRunner:
+def run_gamma_analysis(symbol: str, 
+                      data_provider: Optional[str] = None,
+                      save_results: bool = True,
+                      output_dir: str = "data/gamma_analysis") -> Optional[Dict]:
     """
-    Runs gamma analysis using Magic8-Companion's data providers
-    """
-    
-    def __init__(self):
-        """Initialize the gamma runner"""
-        self.config = get_config()
-        self.analyzer = GammaExposureAnalyzer()
-        self.data_dir = Path(self.config.data_dir) / 'gamma'
-        self.data_dir.mkdir(exist_ok=True)
-        
-        # Get data provider
-        provider_type = self.config.get('M8C_DATA_PROVIDER', 'yahoo')
-        self.provider = get_provider(provider_type)
-        
-        logger.info(f"Gamma runner initialized with {provider_type} provider")
-    
-    def get_option_chain_data(self, symbol: str = 'SPX'):
-        """
-        Get option chain using Magic8's data provider
-        
-        Args:
-            symbol: Symbol to analyze
-            
-        Returns:
-            Tuple of (spot_price, option_chain)
-        """
-        try:
-            # Get underlying data
-            underlying_data = self.provider.get_underlying_data(symbol)
-            spot_price = underlying_data['price']
-            
-            logger.info(f"Got {symbol} spot price: ${spot_price:.2f}")
-            
-            # Get 0DTE option chain
-            expiry_date = datetime.now().strftime('%Y-%m-%d')
-            option_chain = self.provider.get_option_chain(symbol, expiry_date)
-            
-            if option_chain.empty:
-                logger.warning(f"No option chain data for {symbol}")
-                return spot_price, None
-            
-            # Ensure required columns exist
-            required_cols = ['strike', 'call_oi', 'put_oi', 'call_iv', 'put_iv']
-            if not all(col in option_chain.columns for col in required_cols):
-                logger.warning(f"Missing required columns in option chain")
-                return spot_price, None
-            
-            # Add DTE column if not present
-            if 'dte' not in option_chain.columns:
-                option_chain['dte'] = 0  # 0DTE
-            
-            return spot_price, option_chain
-            
-        except Exception as e:
-            logger.error(f"Error fetching option chain: {e}")
-            return None, None
-    
-    def analyze_gamma(self, symbol: str = 'SPX') -> Optional[Dict]:
-        """
-        Run gamma analysis for a symbol
-        
-        Args:
-            symbol: Symbol to analyze
-            
-        Returns:
-            Analysis results dictionary
-        """
-        # Get market data
-        spot_price, option_chain = self.get_option_chain_data(symbol)
-        
-        if not spot_price or option_chain is None:
-            logger.error(f"Failed to get market data for {symbol}")
-            return None
-        
-        # Run gamma analysis
-        gex_data = self.analyzer.calculate_gex(option_chain, spot_price)
-        
-        # Get trading signals
-        signals = self.analyzer.get_gamma_signals(gex_data, spot_price)
-        
-        # Calculate score adjustments
-        adjustments = self.calculate_score_adjustments(signals)
-        
-        # Combine results
-        results = {
-            'symbol': symbol,
-            'timestamp': datetime.now().isoformat(),
-            'spot_price': spot_price,
-            'gamma_metrics': {
-                'net_gex': gex_data['net_gex'],
-                'call_gex': gex_data['call_gex'],
-                'put_gex': gex_data['put_gex'],
-                'gamma_flip': gex_data['gamma_flip'],
-                'call_wall': gex_data['call_wall'],
-                'put_wall': gex_data['put_wall'],
-                'expected_move_pct': gex_data['expected_move'] * 100
-            },
-            'signals': signals,
-            'score_adjustments': adjustments
-        }
-        
-        # Save results
-        self.save_results(results)
-        
-        return results
-    
-    def calculate_score_adjustments(self, signals: Dict) -> Dict:
-        """
-        Calculate scoring adjustments for different strategies
-        
-        Args:
-            signals: Gamma signals dictionary
-            
-        Returns:
-            Strategy score adjustments
-        """
-        adjustments = {
-            'Butterfly': 0,
-            'Iron_Condor': 0,
-            'Vertical': 0
-        }
-        
-        # Positive gamma regime favors premium selling
-        if signals['gamma_regime'] == 'positive':
-            adjustments['Butterfly'] += 15
-            adjustments['Iron_Condor'] += 10
-        else:
-            # Negative gamma favors directional plays
-            adjustments['Vertical'] += 10
-        
-        # Near gamma walls = pinning potential
-        if abs(signals.get('distance_to_call_wall', 1)) < 0.005 or \
-           abs(signals.get('distance_to_put_wall', 1)) < 0.005:
-            adjustments['Butterfly'] += 10
-            adjustments['Iron_Condor'] += 5
-        
-        # Strong signals boost adjustments
-        if signals.get('signal_strength') == 'strong':
-            for strategy in adjustments:
-                adjustments[strategy] = int(adjustments[strategy] * 1.5)
-        
-        # Cap adjustments at ±20
-        for strategy in adjustments:
-            adjustments[strategy] = max(-20, min(20, adjustments[strategy]))
-        
-        return adjustments
-    
-    def save_results(self, results: Dict):
-        """
-        Save gamma analysis results
-        
-        Args:
-            results: Analysis results to save
-        """
-        # Save full results
-        with open(self.data_dir / 'gamma_analysis.json', 'w') as f:
-            json.dump(results, f, indent=2)
-        
-        # Save simplified adjustments for quick access
-        adjustments_output = {
-            'timestamp': results['timestamp'],
-            'symbol': results['symbol'],
-            'score_adjustments': results['score_adjustments'],
-            'gamma_regime': results['signals']['gamma_regime'],
-            'key_levels': {
-                'gamma_flip': results['gamma_metrics']['gamma_flip'],
-                'call_wall': results['gamma_metrics']['call_wall'],
-                'put_wall': results['gamma_metrics']['put_wall']
-            },
-            'market_bias': results['signals']['bias']
-        }
-        
-        with open(self.data_dir / 'gamma_adjustments.json', 'w') as f:
-            json.dump(adjustments_output, f, indent=2)
-        
-        logger.info(f"Gamma analysis saved to {self.data_dir}")
-    
-    def get_latest_analysis(self) -> Optional[Dict]:
-        """
-        Get the latest gamma analysis results
-        
-        Returns:
-            Latest analysis results or None
-        """
-        analysis_file = self.data_dir / 'gamma_analysis.json'
-        if not analysis_file.exists():
-            return None
-        
-        try:
-            with open(analysis_file, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error reading gamma analysis: {e}")
-            return None
-
-
-# Convenience function for running analysis
-def run_gamma_analysis(symbol: str = 'SPX') -> Optional[Dict]:
-    """
-    Run gamma analysis for a symbol
+    Run complete gamma analysis for a symbol.
     
     Args:
-        symbol: Symbol to analyze
+        symbol: Trading symbol (e.g., 'SPX', 'SPY')
+        data_provider: Provider name (ib, yahoo, file). Uses settings default if None
+        save_results: Whether to save results to file
+        output_dir: Directory to save results
         
     Returns:
-        Analysis results
+        Dict with complete gamma analysis or None if failed
     """
-    runner = IntegratedGammaRunner()
-    return runner.analyze_gamma(symbol)
+    try:
+        logger.info(f"Starting gamma analysis for {symbol}")
+        
+        # Get data provider
+        provider = get_provider(data_provider)
+        if not provider.is_connected():
+            logger.error(f"Data provider {data_provider or settings.data_provider} not connected")
+            return None
+        
+        # Get option chain data
+        logger.info(f"Fetching option chain for {symbol}")
+        market_data = provider.get_option_chain(symbol)
+        
+        if not market_data or 'option_chain' not in market_data:
+            logger.error(f"No option chain data available for {symbol}")
+            return None
+        
+        # Get spot price
+        spot_price = market_data.get('current_price') or provider.get_spot_price(symbol)
+        if not spot_price:
+            logger.error(f"No spot price available for {symbol}")
+            return None
+        
+        # Initialize components
+        spot_multiplier = settings.get_gamma_spot_multiplier(symbol)
+        calculator = GammaExposureCalculator(spot_multiplier=spot_multiplier)
+        levels_analyzer = GammaLevels()
+        regime_analyzer = MarketRegimeAnalyzer()
+        
+        # Calculate GEX
+        logger.info(f"Calculating GEX for {symbol}")
+        gex_data = calculator.calculate_gex(
+            spot_price=spot_price,
+            option_chain=market_data['option_chain'],
+            use_0dte_multiplier=True,
+            dte_multiplier=settings.gex_0dte_multiplier
+        )
+        
+        # Find levels
+        logger.info(f"Analyzing gamma levels for {symbol}")
+        gex_data['levels'] = levels_analyzer.find_levels(
+            gex_data['strike_gex'],
+            spot_price
+        )
+        
+        # Analyze regime
+        logger.info(f"Analyzing market regime for {symbol}")
+        gex_data['regime_analysis'] = regime_analyzer.analyze_regime(
+            gex_data,
+            spot_price
+        )
+        
+        # Add metadata
+        gex_data['symbol'] = symbol
+        gex_data['data_provider'] = data_provider or settings.data_provider
+        gex_data['analysis_timestamp'] = datetime.now().isoformat()
+        
+        # Save results if requested
+        if save_results:
+            _save_results(gex_data, symbol, output_dir)
+        
+        # Log summary
+        _log_summary(gex_data)
+        
+        return gex_data
+        
+    except Exception as e:
+        logger.error(f"Error running gamma analysis for {symbol}: {e}", exc_info=True)
+        return None
 
 
-if __name__ == "__main__":
-    # Example usage
-    logging.basicConfig(level=logging.INFO)
+def run_batch_gamma_analysis(symbols: Optional[List[str]] = None,
+                           data_provider: Optional[str] = None) -> Dict[str, Dict]:
+    """
+    Run gamma analysis for multiple symbols.
     
-    results = run_gamma_analysis('SPX')
+    Args:
+        symbols: List of symbols. Uses settings.gamma_symbols if None
+        data_provider: Data provider to use
+        
+    Returns:
+        Dict mapping symbol to analysis results
+    """
+    if symbols is None:
+        symbols = settings.gamma_symbols
+    
+    results = {}
+    
+    for symbol in symbols:
+        logger.info(f"Running batch analysis for {symbol}")
+        result = run_gamma_analysis(symbol, data_provider)
+        if result:
+            results[symbol] = result
+        else:
+            logger.warning(f"Failed to analyze {symbol}")
+    
+    return results
+
+
+def _save_results(gex_data: Dict, symbol: str, output_dir: str) -> None:
+    """Save gamma analysis results to file."""
+    try:
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{symbol}_gamma_{timestamp}.json"
+        filepath = os.path.join(output_dir, filename)
+        
+        # Save to file
+        with open(filepath, 'w') as f:
+            json.dump(gex_data, f, indent=2, default=str)
+        
+        logger.info(f"Saved gamma analysis to {filepath}")
+        
+        # Also save latest analysis (overwrite)
+        latest_filepath = os.path.join(output_dir, f"{symbol}_gamma_latest.json")
+        with open(latest_filepath, 'w') as f:
+            json.dump(gex_data, f, indent=2, default=str)
+        
+    except Exception as e:
+        logger.error(f"Error saving results: {e}")
+
+
+def _log_summary(gex_data: Dict) -> None:
+    """Log summary of gamma analysis."""
+    symbol = gex_data.get('symbol', 'Unknown')
+    net_gex = gex_data.get('net_gex', 0)
+    regime = gex_data.get('regime', 'unknown')
+    levels = gex_data.get('levels', {})
+    regime_analysis = gex_data.get('regime_analysis', {})
+    
+    logger.info(f"""
+    === Gamma Analysis Summary for {symbol} ===
+    Net GEX: ${net_gex:,.0f} ({net_gex/1e9:.2f}B)
+    Regime: {regime} ({regime_analysis.get('magnitude', 'unknown')} magnitude)
+    Bias: {regime_analysis.get('bias', 'unknown')}
+    Call Wall: {levels.get('call_wall', 'N/A')}
+    Put Wall: {levels.get('put_wall', 'N/A')}
+    Zero Gamma: {levels.get('zero_gamma', 'N/A')}
+    Expected Behavior: {regime_analysis.get('expected_behavior', {}).get('description', 'N/A')}
+    """)
+
+
+# Allow running as script
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Run gamma analysis")
+    parser.add_argument("symbol", help="Symbol to analyze")
+    parser.add_argument("--provider", help="Data provider (ib, yahoo, file)")
+    parser.add_argument("--no-save", action="store_true", help="Don't save results")
+    
+    args = parser.parse_args()
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Run analysis
+    results = run_gamma_analysis(
+        symbol=args.symbol,
+        data_provider=args.provider,
+        save_results=not args.no_save
+    )
+    
     if results:
-        print(f"\n=== Gamma Analysis Results ===")
-        print(f"Symbol: {results['symbol']}")
-        print(f"Spot Price: ${results['spot_price']:,.2f}")
-        print(f"\nGamma Metrics:")
-        print(f"  Net GEX: ${results['gamma_metrics']['net_gex']:,.0f}")
-        print(f"  Gamma Flip: ${results['gamma_metrics']['gamma_flip']:,.0f}")
-        print(f"  Call Wall: ${results['gamma_metrics']['call_wall']:,.0f}")
-        print(f"  Put Wall: ${results['gamma_metrics']['put_wall']:,.0f}")
-        print(f"\nScore Adjustments:")
-        for strategy, adj in results['score_adjustments'].items():
-            print(f"  {strategy}: {adj:+d}")
+        print(json.dumps(results, indent=2, default=str))
+    else:
+        print("Gamma analysis failed")
+        sys.exit(1)
