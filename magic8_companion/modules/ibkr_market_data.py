@@ -55,22 +55,23 @@ class IBKRMarketData:
         self.client_id = settings.ibkr_client_id
         self.fallback_to_yahoo = settings.ibkr_fallback_to_yahoo
         
-        # Symbol mapping for IBKR
+        # Symbol mapping for IBKR - support both SPX and SPXW
         self.symbol_map = {
-            'SPX': 'SPX',    # S&P 500 Index
-            'QQQ': 'QQQ',    # NASDAQ 100 ETF
-            'IWM': 'IWM',    # Russell 2000 ETF
-            'SPY': 'SPY',    # S&P 500 ETF
-            'RUT': 'RUT'     # Russell 2000 Index
+            'SPX': ['SPX', 'SPXW'],    # Try both for S&P 500 Index
+            'QQQ': ['QQQ'],             # NASDAQ 100 ETF
+            'IWM': ['IWM'],             # Russell 2000 ETF
+            'SPY': ['SPY'],             # S&P 500 ETF
+            'RUT': ['RUT']              # Russell 2000 Index
         }
         
-        # Exchange mapping
+        # Exchange mapping - prioritize SMART for better fills
         self.exchange_map = {
-            'SPX': 'CBOE',
-            'RUT': 'RUSSELL',
-            'QQQ': 'SMART',
-            'IWM': 'SMART',
-            'SPY': 'SMART'
+            'SPX': ['SMART', 'CBOE'],
+            'SPXW': ['SMART', 'CBOE'],
+            'RUT': ['SMART', 'CBOE', 'RUSSELL'],
+            'QQQ': ['SMART', 'NASDAQ', 'CBOE'],
+            'IWM': ['SMART', 'ARCA', 'CBOE'],
+            'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS']
         }
         
         # Trading class preferences for 0DTE
@@ -105,6 +106,46 @@ class IBKRMarketData:
             self.connected = False
             logger.info("Disconnected from IBKR TWS")
     
+    async def qualify_underlying_with_fallback(self, symbol: str) -> Optional[Contract]:
+        """Qualify underlying contract with fallback to different symbols and exchanges."""
+        # Get symbol variations to try
+        symbol_variations = self.symbol_map.get(symbol, [symbol])
+        
+        for sym_variant in symbol_variations:
+            # Get exchanges to try for this symbol
+            exchanges = self.exchange_map.get(sym_variant, ['SMART'])
+            
+            for exchange in exchanges:
+                try:
+                    # Create appropriate contract
+                    if symbol in ['SPX', 'RUT']:
+                        # Index options
+                        underlying = Index(
+                            symbol=sym_variant,
+                            exchange=exchange,
+                            currency='USD'
+                        )
+                    else:
+                        # Stock/ETF options
+                        underlying = Stock(
+                            symbol=sym_variant,
+                            exchange=exchange,
+                            currency='USD'
+                        )
+                    
+                    # Try to qualify
+                    contracts = await self.ib.qualifyContractsAsync(underlying)
+                    if contracts and contracts[0].conId:
+                        logger.info(f"Successfully qualified {symbol} as {sym_variant} on {exchange} (conId={contracts[0].conId})")
+                        return contracts[0]
+                    
+                except Exception as e:
+                    logger.debug(f"Failed to qualify {sym_variant} on {exchange}: {e}")
+                    continue
+        
+        logger.error(f"Failed to qualify {symbol} on any exchange with any symbol variation")
+        return None
+    
     async def get_market_data(self, symbol: str) -> Optional[Dict]:
         """
         Fetch real market data for a symbol from IBKR.
@@ -122,33 +163,16 @@ class IBKRMarketData:
                         return await yahoo_fetcher.get_market_data(symbol)
                     return None
             
-            # Get underlying contract
-            ibkr_symbol = self.symbol_map.get(symbol, symbol)
-            exchange = self.exchange_map.get(symbol, 'SMART')
-            
-            # Create appropriate contract
-            if symbol in ['SPX', 'RUT']:
-                # Index options
-                underlying = Index(
-                    symbol=ibkr_symbol,
-                    exchange=exchange,
-                    currency='USD'
-                )
-            else:
-                # Stock/ETF options
-                underlying = Stock(
-                    symbol=ibkr_symbol,
-                    exchange=exchange,
-                    currency='USD'
-                )
-            
-            # Qualify the contract
-            contracts = await self.ib.qualifyContractsAsync(underlying)
-            if not contracts:
+            # Get underlying contract with fallback
+            underlying = await self.qualify_underlying_with_fallback(symbol)
+            if not underlying:
                 logger.error(f"Failed to qualify contract for {symbol}")
+                if self.fallback_to_yahoo:
+                    logger.warning("Falling back to Yahoo Finance due to qualification failure")
+                    from .real_market_data import RealMarketData
+                    yahoo_fetcher = RealMarketData()
+                    return await yahoo_fetcher.get_market_data(symbol)
                 return None
-            underlying = contracts[0]
-            logger.debug(f"Qualified {symbol}: conId={underlying.conId}")
             
             # Get current price
             ticker = await self.ib.reqTickersAsync(underlying)
@@ -157,6 +181,7 @@ class IBKRMarketData:
                 return None
             
             current_price = float(ticker[0].marketPrice())
+            logger.info(f"Got spot price for {symbol}: ${current_price:.2f}")
             
             # Get option chain data with Greeks
             option_chain_data = await self._get_option_chain_with_greeks(
@@ -252,15 +277,19 @@ class IBKRMarketData:
 
     async def qualify_contract_with_fallback(self, contract: Contract, symbol: str) -> Optional[Contract]:
         """Qualify contract with fallback to different exchanges."""
+        # Enhanced exchange fallbacks
         exchange_fallbacks = {
-            'SPY': ['SMART', 'CBOE', 'AMEX', 'ISE'],
-            'SPX': ['CBOE', 'SMART'],
-            'QQQ': ['SMART', 'NASDAQ'],
-            'IWM': ['SMART', 'ARCA'],
-            'RUT': ['RUSSELL', 'SMART']
+            'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS', 'AMEX', 'ISE'],
+            'SPX': ['SMART', 'CBOE'],
+            'SPXW': ['SMART', 'CBOE'],
+            'QQQ': ['SMART', 'NASDAQ', 'CBOE', 'ARCA'],
+            'IWM': ['SMART', 'ARCA', 'CBOE'],
+            'RUT': ['SMART', 'CBOE', 'RUSSELL']
         }
 
-        fallback_exchanges = exchange_fallbacks.get(symbol, ['SMART'])
+        # Get the underlying symbol from the contract
+        contract_symbol = contract.symbol
+        fallback_exchanges = exchange_fallbacks.get(contract_symbol, exchange_fallbacks.get(symbol, ['SMART']))
         original_exchange = contract.exchange
 
         for exchange in fallback_exchanges:
@@ -272,7 +301,7 @@ class IBKRMarketData:
                         strike_desc = getattr(contract, 'strike', '?')
                         right = getattr(contract, 'right', '')
                         logger.info(
-                            f"Qualified {strike_desc} {right} on {exchange} (original {original_exchange})"
+                            f"Qualified {contract_symbol} {strike_desc} {right} on {exchange} (original {original_exchange})"
                         )
                     return qualified[0]
             except Exception as e:
@@ -280,7 +309,7 @@ class IBKRMarketData:
                 continue
 
         strike_desc = getattr(contract, 'strike', '?')
-        logger.warning(f"Failed to qualify {strike_desc} on any exchange")
+        logger.warning(f"Failed to qualify {contract_symbol} {strike_desc} on any exchange")
         return None
     
     async def _get_option_chain_with_greeks(
@@ -293,16 +322,26 @@ class IBKRMarketData:
         try:
             chains = []
             
-            # Use the contract's actual conId
-            logger.info(f"Fetching option chains for {original_symbol} (conId={underlying.conId})")
+            # Use the contract's actual conId and symbol
+            logger.info(f"Fetching option chains for {original_symbol} (underlying: {underlying.symbol}, conId={underlying.conId})")
             
-            # Get all available chains
+            # Try to get chains for the qualified underlying symbol
             chains = await self.ib.reqSecDefOptParamsAsync(
                 underlyingSymbol=underlying.symbol,
                 futFopExchange='',
                 underlyingSecType=underlying.secType,
                 underlyingConId=underlying.conId
             )
+            
+            # If no chains found and we're looking for SPX, try SPXW explicitly
+            if not chains and original_symbol == 'SPX' and underlying.symbol != 'SPXW':
+                logger.info("No chains found for SPX, trying SPXW...")
+                chains = await self.ib.reqSecDefOptParamsAsync(
+                    underlyingSymbol='SPXW',
+                    futFopExchange='',
+                    underlyingSecType=underlying.secType,
+                    underlyingConId=underlying.conId
+                )
             
             if not chains:
                 logger.warning(f"No option chains found for {original_symbol}")
@@ -344,7 +383,15 @@ class IBKRMarketData:
             
             # Sort by date and get nearest
             expirations.sort(key=lambda x: x[1])
-            nearest_exp, exp_date, selected_chain = expirations[0]
+            
+            # For 0DTE, prefer today's expiration if available
+            today_expirations = [(exp, exp_date, chain) for exp, exp_date, chain in expirations if exp_date == today]
+            if today_expirations:
+                nearest_exp, exp_date, selected_chain = today_expirations[0]
+                logger.info(f"Found 0DTE expiration: {nearest_exp}")
+            else:
+                nearest_exp, exp_date, selected_chain = expirations[0]
+                logger.info(f"No 0DTE available, using nearest expiration: {nearest_exp}")
             
             logger.info(f"Selected expiration: {nearest_exp} ({exp_date}) on {selected_chain.exchange} "
                        f"with tradingClass={selected_chain.tradingClass}")
@@ -375,15 +422,11 @@ class IBKRMarketData:
             all_contracts = []
             contract_map = {}  # Map conId to (strike, right)
             
-            # Use the symbol from the underlying contract
-            option_symbol = underlying.symbol
+            # Use the symbol from the selected chain's trading class if available
+            option_symbol = selected_chain.tradingClass if hasattr(selected_chain, 'tradingClass') and selected_chain.tradingClass else underlying.symbol
             
-            # Force SMART routing for SPY to ensure all strikes are accessible
-            if original_symbol == 'SPY':
-                contract_exchange = 'SMART'
-                logger.info(f"Using SMART routing for {original_symbol} to ensure all strikes are accessible")
-            else:
-                contract_exchange = selected_chain.exchange
+            # Force SMART routing for better fills
+            contract_exchange = 'SMART'
             
             # First, create and qualify all contracts
             for strike in strikes:
@@ -406,7 +449,7 @@ class IBKRMarketData:
                     currency='USD'
                 )
                 
-                # Set trading class
+                # Set trading class if available
                 if hasattr(selected_chain, 'tradingClass') and selected_chain.tradingClass:
                     call.tradingClass = selected_chain.tradingClass
                     put.tradingClass = selected_chain.tradingClass
