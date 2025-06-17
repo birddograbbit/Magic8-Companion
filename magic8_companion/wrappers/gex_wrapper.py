@@ -174,9 +174,12 @@ class GammaExposureWrapper:
         strike_gex = {}
         
         for opt in options:
-            total_gamma = (opt.call_gamma * opt.call_oi + 
-                          opt.put_gamma * opt.put_oi)
-            strike_gex[opt.strike] = total_gamma
+            total_gamma = (
+                opt.call_gamma * opt.call_oi +
+                opt.put_gamma * opt.put_oi
+            )
+            # Aggregate gamma exposure for strikes that appear multiple times
+            strike_gex[opt.strike] = strike_gex.get(opt.strike, 0) + total_gamma
         
         # Sort by total gamma exposure
         sorted_strikes = sorted(strike_gex.items(), 

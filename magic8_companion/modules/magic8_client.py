@@ -1,7 +1,7 @@
 import json
 import aiohttp
 import aiofiles
-from ..config import settings
+from ..unified_config import settings
 
 async def fetch_from_file(path: str):
     try:
