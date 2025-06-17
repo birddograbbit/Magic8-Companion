@@ -67,6 +67,7 @@ class MarketAnalyzer:
                 "implied_vol": market_data.get("implied_vol", 20),
                 "iv_percentile": market_data.get("iv_percentile", 50),
                 "last_updated": datetime.now().isoformat(),
+                "source": market_data.get("data_provider", "unknown"),
                 "option_chain": option_chain_data or []
             }
             
@@ -204,16 +205,16 @@ class MarketAnalyzer:
                     strikes_data[strike]["call_bid"] = opt.get("bid", 0.0) or 0.0
                     strikes_data[strike]["call_ask"] = opt.get("ask", 0.0) or 0.0
                     # Add Greeks if available from IBKR
-                    strikes_data[strike]["call_gamma"] = 0.01  # Placeholder - would need to get from IBKR modelGreeks
-                    strikes_data[strike]["call_delta"] = 0.5 if strike >= current_price else 0.3  # Rough approximation
+                    strikes_data[strike]["call_gamma"] = opt.get("gamma", 0.0) or 0.0
+                    strikes_data[strike]["call_delta"] = opt.get("delta", 0.0) if opt.get("delta") is not None else (0.5 if strike >= current_price else 0.3)
                 else:  # Put
                     strikes_data[strike]["put_oi"] = opt.get("open_interest", 0) or 0
                     strikes_data[strike]["put_iv"] = opt.get("implied_volatility", 0.20) or 0.20
                     strikes_data[strike]["put_bid"] = opt.get("bid", 0.0) or 0.0
                     strikes_data[strike]["put_ask"] = opt.get("ask", 0.0) or 0.0
                     # Add Greeks if available from IBKR
-                    strikes_data[strike]["put_gamma"] = 0.01  # Placeholder - would need to get from IBKR modelGreeks
-                    strikes_data[strike]["put_delta"] = -0.5 if strike <= current_price else -0.3  # Rough approximation
+                    strikes_data[strike]["put_gamma"] = opt.get("gamma", 0.0) or 0.0
+                    strikes_data[strike]["put_delta"] = opt.get("delta", 0.0) if opt.get("delta") is not None else (-0.5 if strike <= current_price else -0.3)
             
             # Convert to list sorted by strike
             option_chain_data = list(strikes_data.values())
