@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     ibkr_client_id: int = 1
     ibkr_fallback_to_yahoo: bool = True
     
+    # OI Streaming settings
+    enable_oi_streaming: bool = True  # Enable/disable OI streaming
+    oi_streaming_timeout: float = 2.0  # Timeout for OI data collection
+    
     # === API KEYS ===
     
     polygon_api_key: str = ""
