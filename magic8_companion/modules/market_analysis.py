@@ -88,10 +88,7 @@ class MarketAnalyzer:
         else:
             market_data = await self._get_live_market_data(symbol)
         
-        # Write to cache for other modules to use
-        if market_data:
-            self._write_market_data_cache(symbol, market_data)
-            
+        # Already written to cache in the data fetching methods
         return market_data
     
     async def _get_live_market_data(self, symbol: str) -> Optional[Dict]:
@@ -130,7 +127,7 @@ class MarketAnalyzer:
             # Ensure connection
             await ib_client._ensure_connected()
             
-            # Get ATM options data (includes IV)
+            # Get ATM options data (includes IV) - but we need more strikes!
             atm_options = await ib_client.get_atm_options([symbol], days_to_expiry=0)
             
             if not atm_options:
@@ -174,17 +171,56 @@ class MarketAnalyzer:
             else:
                 gamma_env = self._determine_gamma_environment(iv_percentile, expected_range_pct)
             
-            # Prepare option chain data for cache
-            option_chain_data = []
+            # Build comprehensive option chain data for MLOptionTrading
+            # Organize by strike to consolidate call/put data
+            strikes_data = {}
+            
             for opt in atm_options:
-                option_chain_data.append({
-                    "strike": opt.get("strike", 0),
-                    "call_oi": opt.get("open_interest", 0) if opt.get("right") == "C" else 0,
-                    "put_oi": opt.get("open_interest", 0) if opt.get("right") == "P" else 0,
-                    "call_iv": opt.get("implied_volatility", 0.20) if opt.get("right") == "C" else 0,
-                    "put_iv": opt.get("implied_volatility", 0.20) if opt.get("right") == "P" else 0,
-                    "dte": 0  # 0DTE for MLOptionTrading
-                })
+                strike = opt.get("strike", 0)
+                if strike not in strikes_data:
+                    strikes_data[strike] = {
+                        "strike": strike,
+                        "call_oi": 0,
+                        "put_oi": 0,
+                        "call_iv": 0.20,
+                        "put_iv": 0.20,
+                        "call_bid": 0.0,
+                        "call_ask": 0.0,
+                        "put_bid": 0.0,
+                        "put_ask": 0.0,
+                        "call_gamma": 0.0,
+                        "put_gamma": 0.0,
+                        "call_delta": 0.0,
+                        "put_delta": 0.0,
+                        "call_volume": 0,
+                        "put_volume": 0,
+                        "dte": 0  # 0DTE for MLOptionTrading
+                    }
+                
+                # Fill in the data based on option type
+                if opt.get("right") == "C":
+                    strikes_data[strike]["call_oi"] = opt.get("open_interest", 0) or 0
+                    strikes_data[strike]["call_iv"] = opt.get("implied_volatility", 0.20) or 0.20
+                    strikes_data[strike]["call_bid"] = opt.get("bid", 0.0) or 0.0
+                    strikes_data[strike]["call_ask"] = opt.get("ask", 0.0) or 0.0
+                    # Add Greeks if available from IBKR
+                    strikes_data[strike]["call_gamma"] = 0.01  # Placeholder - would need to get from IBKR modelGreeks
+                    strikes_data[strike]["call_delta"] = 0.5 if strike >= current_price else 0.3  # Rough approximation
+                else:  # Put
+                    strikes_data[strike]["put_oi"] = opt.get("open_interest", 0) or 0
+                    strikes_data[strike]["put_iv"] = opt.get("implied_volatility", 0.20) or 0.20
+                    strikes_data[strike]["put_bid"] = opt.get("bid", 0.0) or 0.0
+                    strikes_data[strike]["put_ask"] = opt.get("ask", 0.0) or 0.0
+                    # Add Greeks if available from IBKR
+                    strikes_data[strike]["put_gamma"] = 0.01  # Placeholder - would need to get from IBKR modelGreeks
+                    strikes_data[strike]["put_delta"] = -0.5 if strike <= current_price else -0.3  # Rough approximation
+            
+            # Convert to list sorted by strike
+            option_chain_data = list(strikes_data.values())
+            option_chain_data.sort(key=lambda x: x["strike"])
+            
+            # Log what we're caching
+            logger.info(f"Caching {len(option_chain_data)} strikes for {symbol} option chain")
             
             market_data = {
                 "symbol": symbol,
@@ -274,7 +310,7 @@ class MarketAnalyzer:
                     self._store_iv_history(symbol, iv)
                     iv_percentile = self._calculate_iv_percentile(symbol, iv)
                     
-                    # Prepare option chain data for cache
+                    # Prepare comprehensive option chain data for cache
                     for _, call_row in calls.iterrows():
                         put_row = puts[puts['strike'] == call_row['strike']]
                         option_chain_data.append({
@@ -283,6 +319,16 @@ class MarketAnalyzer:
                             "put_oi": int(put_row['openInterest'].iloc[0]) if not put_row.empty else 0,
                             "call_iv": call_row.get('impliedVolatility', 0.20),
                             "put_iv": put_row['impliedVolatility'].iloc[0] if not put_row.empty else 0.20,
+                            "call_bid": call_row.get('bid', 0.0),
+                            "call_ask": call_row.get('ask', 0.0),
+                            "put_bid": put_row['bid'].iloc[0] if not put_row.empty else 0.0,
+                            "put_ask": put_row['ask'].iloc[0] if not put_row.empty else 0.0,
+                            "call_gamma": 0.01,  # Yahoo doesn't provide Greeks
+                            "put_gamma": 0.01,
+                            "call_delta": 0.5 if call_row['strike'] >= current_price else 0.3,
+                            "put_delta": -0.5 if call_row['strike'] <= current_price else -0.3,
+                            "call_volume": int(call_row.get('volume', 0)),
+                            "put_volume": int(put_row['volume'].iloc[0]) if not put_row.empty else 0,
                             "dte": 0  # Approximate for 0DTE
                         })
                 else:
@@ -354,8 +400,8 @@ class MarketAnalyzer:
         iv = base_iv * time_multiplier
         iv_percentile = min(100, iv * 2)  # Simple mock percentile
         
-        # Generate mock option chain
-        strikes = [base_price + i * 10 for i in range(-10, 11)]
+        # Generate more comprehensive mock option chain
+        strikes = [base_price + i * 5 for i in range(-20, 21)]  # More strikes
         option_chain_data = []
         for strike in strikes:
             distance = abs(strike - base_price) / base_price
@@ -366,6 +412,16 @@ class MarketAnalyzer:
                 "put_oi": base_oi,
                 "call_iv": base_iv / 100 + distance * 0.1,
                 "put_iv": base_iv / 100 + distance * 0.1,
+                "call_bid": max(0, base_price - strike) * 0.95 if strike < base_price else 0.5,
+                "call_ask": max(0, base_price - strike) * 1.05 if strike < base_price else 0.6,
+                "put_bid": max(0, strike - base_price) * 0.95 if strike > base_price else 0.5,
+                "put_ask": max(0, strike - base_price) * 1.05 if strike > base_price else 0.6,
+                "call_gamma": 0.01 * np.exp(-distance * 10),
+                "put_gamma": 0.01 * np.exp(-distance * 10),
+                "call_delta": 0.5 - distance * 2 if strike >= base_price else 0.5 + distance * 2,
+                "put_delta": -0.5 + distance * 2 if strike <= base_price else -0.5 - distance * 2,
+                "call_volume": base_oi // 10,
+                "put_volume": base_oi // 10,
                 "dte": 0
             })
         
