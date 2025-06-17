@@ -4,9 +4,12 @@ This guide addresses common issues with Interactive Brokers (IBKR) connection an
 
 ## Recent Fixes (June 17, 2025)
 
+### Important: Correct File Location
+The IBKR connection logic is in **`ib_client.py`**, not `ibkr_market_data.py`. Make sure to apply fixes to the correct file!
+
 ### 1. Enhanced Symbol Support
 The system now automatically tries multiple symbol variations:
-- **SPX**: Tries both `SPX` and `SPXW` symbols
+- **SPX**: Tries both `SPXW` and `SPX` symbols (prefers SPXW for 0DTE)
 - **SPXW** is preferred for 0DTE options on S&P 500
 
 ### 2. Multiple Exchange Fallback
@@ -56,6 +59,25 @@ When IBKR fails, the system falls back to Yahoo Finance, which has rate limits.
 2. Add delays between requests
 3. Use cache data when available
 
+## Architecture Overview
+
+### Data Flow
+```
+1. Magic8-Companion → market_analysis.py → ib_client.py → IBKR
+2. If successful: Writes real data + option chain to cache
+3. MLOptionTrading → reads cache → uses option chain data
+
+If IBKR fails:
+1. Falls back to Yahoo Finance → limited data
+2. Falls back to mock data → no option chain
+3. MLOptionTrading can't find option chain → uses its own fallback
+```
+
+### Key Files
+- **`magic8_companion/modules/ib_client.py`** - Main IBKR connection logic (THIS IS THE FILE TO FIX!)
+- **`magic8_companion/modules/market_analysis.py`** - Calls ib_client and manages fallbacks
+- **`magic8_companion/modules/ibkr_market_data.py`** - Alternative implementation (NOT USED BY DEFAULT)
+
 ## Configuration
 
 ### Environment Variables
@@ -85,17 +107,39 @@ Run the test script to verify IBKR connectivity:
 
 ```bash
 cd ~/magic8/Magic8-Companion
-python scripts/test_ibkr_market_data.py
+python -m magic8_companion.modules.ib_client
 ```
 
 Expected output:
 ```
-Connected to IBKR TWS at 127.0.0.1:7497
-Successfully qualified SPX as SPXW on SMART (conId=...)
-Got spot price for SPX: $6000.00
-Found 0DTE expiration: 20250617
-Successfully qualified 50 option contracts
+Connecting to IB: 127.0.0.1:7497 with ClientID: 1
+Successfully connected to IB.
+
+Fetching ATM options for SPX (0DTE)...
+Qualified SPX as SPXW on SMART
+SPX Option: K=6000 C, Bid=45.20, Ask=45.50, IV=0.1523
+SPX Option: K=6000 P, Bid=43.10, Ask=43.40, IV=0.1498
 ...
+```
+
+## Success Confirmation
+
+When working correctly, you should see:
+
+### In Magic8-Companion logs:
+```
+- "Qualified SPX as SPXW on SMART" (or similar)
+- NO "No security definition found" errors
+- NO "Falling back to mock data" messages
+- Option chain data being written to cache
+```
+
+### In MLOptionTrading logs:
+```
+- "Using cached IBKR data for SPX"
+- "Found cached option chain with X strikes"
+- Net GEX calculations using real data
+- NO "No cached option chain" warnings
 ```
 
 ## Advanced Debugging
@@ -103,7 +147,8 @@ Successfully qualified 50 option contracts
 ### Enable Detailed Logging
 ```python
 import logging
-logging.getLogger('magic8_companion.modules.ibkr_market_data').setLevel(logging.DEBUG)
+logging.getLogger('magic8_companion.modules.ib_client').setLevel(logging.DEBUG)
+logging.getLogger('magic8_companion.modules.market_analysis').setLevel(logging.DEBUG)
 ```
 
 ### Common Log Messages
@@ -111,6 +156,13 @@ logging.getLogger('magic8_companion.modules.ibkr_market_data').setLevel(logging.
 - `"Using SMART routing for better fills"` - Exchange routing optimization
 - `"Found 0DTE expiration"` - Successfully identified today's options
 - `"No chains found for SPX, trying SPXW"` - Automatic symbol fallback
+
+### Verify Cache Contents
+Check if option chain is being cached:
+```bash
+cat data/market_data_cache.json | jq '.data.SPX.option_chain | length'
+```
+Should return a number > 0 if option chain is cached.
 
 ## Performance Optimization
 
@@ -133,11 +185,12 @@ To avoid IBKR ticker limits:
 4. ✓ Valid market data subscriptions in IBKR
 5. ✓ Firewall allows connections on configured port
 6. ✓ No other applications using the same client ID
+7. ✓ Using correct file: `ib_client.py` (not `ibkr_market_data.py`)
 
 ## Support
 
 For additional help:
 1. Check IBKR API documentation
-2. Review logs in `magic8_companion/modules/ibkr_market_data.py`
+2. Review logs in `magic8_companion/modules/ib_client.py`
 3. Test with different symbols to isolate issues
 4. Verify market data subscriptions in IBKR account
