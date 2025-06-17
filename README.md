@@ -8,6 +8,7 @@ A simplified trade type recommendation engine that analyzes market conditions an
 - **[INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md)** - DiscordTrading integration details
 - **[ENHANCED_INDICATORS.md](ENHANCED_INDICATORS.md)** - Enhanced features documentation
 - **[SCORING_SYSTEM.md](SCORING_SYSTEM.md)** - Scoring logic reference
+- **[IBKR_TROUBLESHOOTING.md](IBKR_TROUBLESHOOTING.md)** - Interactive Brokers connection troubleshooting
 
 ## 🚀 New Features
 
@@ -20,6 +21,11 @@ A simplified trade type recommendation engine that analyzes market conditions an
 - **Greeks Analysis**: Delta, Theta, Vega calculations
 - **Advanced Gamma Exposure**: Net GEX, gamma walls, 0DTE multipliers
 - **Volume/OI Analytics**: Market sentiment and liquidity analysis
+
+### IBKR Connection Improvements (June 17, 2025)
+- **Automatic SPX/SPXW handling**: Supports both symbols for 0DTE options
+- **Multiple exchange fallback**: Tries SMART, CBOE, and other exchanges
+- **Better error handling**: Improved logging and automatic recovery
 
 ## Overview
 
@@ -137,6 +143,7 @@ The system outputs recommendations to `data/recommendations.json`:
 - Real-time data
 - Requires IB Gateway/TWS
 - Best for production
+- See **[IBKR_TROUBLESHOOTING.md](IBKR_TROUBLESHOOTING.md)** for setup help
 
 ### Polygon.io
 - Professional market data
@@ -160,12 +167,15 @@ Magic8-Companion/
 
 ## Troubleshooting
 
-For detailed troubleshooting, see **[CONSOLIDATED_GUIDE.md](docs/CONSOLIDATED_GUIDE.md)**
+For detailed troubleshooting, see:
+- **[CONSOLIDATED_GUIDE.md](docs/CONSOLIDATED_GUIDE.md)** - General issues
+- **[IBKR_TROUBLESHOOTING.md](IBKR_TROUBLESHOOTING.md)** - IBKR-specific issues
 
 Common issues:
 - **No recommendations**: Lower `M8C_MIN_RECOMMENDATION_SCORE` to 65
 - **No gamma data**: Ensure MLOptionTrading is running
 - **All trades skipped**: Check confidence thresholds and strategy mapping
+- **IBKR connection errors**: See IBKR troubleshooting guide
 
 ## Testing
 
@@ -190,5 +200,6 @@ MIT License - See LICENSE file for details
 
 For issues or questions:
 - Check **[CONSOLIDATED_GUIDE.md](docs/CONSOLIDATED_GUIDE.md)** first
+- For IBKR issues, see **[IBKR_TROUBLESHOOTING.md](IBKR_TROUBLESHOOTING.md)**
 - Open a GitHub issue
 - Review test scripts for examples
