@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     
     # Live data provider selection
     market_data_provider: str = "yahoo"  # yahoo, ib, or polygon
+    data_provider: str = "ib"  # For gamma analysis: ib, yahoo, polygon
     
     # Time zone
     timezone: str = "America/New_York"
@@ -78,6 +79,24 @@ class Settings(BaseSettings):
     ml_option_trading_path: str = "../MLOptionTrading"  # Path to MLOptionTrading repo
     gamma_integration_mode: str = "file"  # Mode: file or api
     gamma_max_age_minutes: int = 5  # Max age for gamma data before refresh
+    
+    # === NATIVE GAMMA SETTINGS ===
+    
+    # Gamma analysis symbols
+    gamma_symbols: List[str] = ["SPX"]
+    
+    # Gamma scheduler settings
+    gamma_scheduler_mode: str = "scheduled"  # scheduled or interval
+    gamma_scheduler_times: List[str] = ["10:30", "11:00", "12:30", "14:45"]
+    gamma_scheduler_interval: int = 5  # minutes for interval mode
+    
+    # Gamma calculation settings
+    gamma_spot_multipliers: dict = {"SPX": 10, "RUT": 10, "DEFAULT": 100}
+    gamma_regime_thresholds: dict = {
+        "extreme": 5e9,    # $5B
+        "high": 1e9,       # $1B
+        "moderate": 500e6  # $500M
+    }
     
     # === LOGGING CONFIGURATION ===
     
@@ -178,6 +197,10 @@ class Settings(BaseSettings):
     def get_scorer_mode(self) -> str:
         """Get the appropriate scorer mode based on system complexity."""
         return self.system_complexity
+    
+    def get_gamma_spot_multiplier(self, symbol: str) -> int:
+        """Get the spot multiplier for a given symbol."""
+        return self.gamma_spot_multipliers.get(symbol, self.gamma_spot_multipliers["DEFAULT"])
     
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
