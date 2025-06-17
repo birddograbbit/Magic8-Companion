@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 from typing import List, Union
 from enum import Enum
+import json
 
 
 class SystemComplexity(Enum):
@@ -148,24 +149,48 @@ class Settings(BaseSettings):
     @field_validator('supported_symbols', 'checkpoint_times', 'gamma_symbols', 'gamma_scheduler_times', mode='before')
     @classmethod
     def parse_list_fields(cls, v: Union[str, List[str]]) -> List[str]:
-        """Parse comma-separated strings into lists."""
+        """Parse comma-separated strings or JSON arrays into lists."""
         if isinstance(v, str):
             # Handle empty strings
             if not v.strip():
                 return []
-            # Split by comma and strip whitespace
+            
+            # Try to parse as JSON array first (for backward compatibility)
+            v_stripped = v.strip()
+            if v_stripped.startswith('[') and v_stripped.endswith(']'):
+                try:
+                    parsed = json.loads(v_stripped)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed]
+                except (json.JSONDecodeError, ValueError):
+                    # If JSON parsing fails, fall back to comma-separated
+                    pass
+            
+            # Fall back to comma-separated parsing
             return [item.strip() for item in v.split(',') if item.strip()]
         return v
     
     @field_validator('iron_condor_iv_range', mode='before')
     @classmethod
     def parse_int_list_fields(cls, v: Union[str, List[int]]) -> List[int]:
-        """Parse comma-separated strings into list of integers."""
+        """Parse comma-separated strings or JSON arrays into list of integers."""
         if isinstance(v, str):
             # Handle empty strings
             if not v.strip():
                 return []
-            # Split by comma, strip whitespace, and convert to int
+            
+            # Try to parse as JSON array first (for backward compatibility)
+            v_stripped = v.strip()
+            if v_stripped.startswith('[') and v_stripped.endswith(']'):
+                try:
+                    parsed = json.loads(v_stripped)
+                    if isinstance(parsed, list):
+                        return [int(item) for item in parsed]
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    # If JSON parsing fails, fall back to comma-separated
+                    pass
+            
+            # Fall back to comma-separated parsing
             return [int(item.strip()) for item in v.split(',') if item.strip()]
         return v
     
