@@ -2,7 +2,7 @@
 Unified configuration for Magic8-Companion recommendation engine.
 Consolidates config.py and config_simplified.py into one flexible system.
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 from enum import Enum
 
@@ -175,9 +175,11 @@ class Settings(BaseSettings):
         """Get the appropriate scorer mode based on system complexity."""
         return self.system_complexity
     
-    class Config:
-        env_file = ".env"
-        env_prefix = "M8C_"  # Magic8-Companion prefix
+    # Pydantic v2 configuration
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="M8C_",
+    )
 
 
 # Global settings instance

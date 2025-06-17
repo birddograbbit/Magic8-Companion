@@ -1,7 +1,7 @@
 import asyncio
 from typing import List, Dict, Optional
 from ib_async import IB, Stock, Option, MarketOrder, Contract, util, Position, OptionChain, Ticker, Index
-from ..config import settings
+from ..unified_config import settings
 
 class IBClient:
     def __init__(self, host: str = settings.ib_host, port: int = settings.ib_port, client_id: int = settings.ib_client_id):

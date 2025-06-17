@@ -1,5 +1,5 @@
 import requests
-from ..config import settings
+from ..unified_config import settings
 
 def send_discord_alert(message: str):
     """

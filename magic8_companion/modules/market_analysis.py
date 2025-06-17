@@ -13,7 +13,7 @@ from collections import deque
 import json
 from pathlib import Path
 
-from ..config import settings
+from ..unified_config import settings
 from ..modules.ib_client_manager import IBClientManager
 
 logger = logging.getLogger(__name__)

@@ -245,7 +245,7 @@ def check_daily_loss_limit() -> bool:
     Returns:
         True if within limits, False if limit exceeded
     """
-    from ..config import settings
+    from ..unified_config import settings
     
     daily_pnl = get_daily_pnl()
     if daily_pnl <= -settings.max_daily_loss:

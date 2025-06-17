@@ -5,7 +5,7 @@ This prevents client ID conflicts when multiple MarketAnalyzer instances are cre
 import asyncio
 from typing import Optional
 from .ib_client import IBClient
-from ..config import settings
+from ..unified_config import settings
 
 
 class IBClientManager:
