@@ -3,7 +3,8 @@ Unified configuration for Magic8-Companion recommendation engine.
 Consolidates config.py and config_simplified.py into one flexible system.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from pydantic import field_validator
+from typing import List, Union
 from enum import Enum
 
 
@@ -141,6 +142,32 @@ class Settings(BaseSettings):
     butterfly_iv_threshold: int = 50  # Up from 40
     iron_condor_iv_range: List[int] = [25, 85]  # Expanded from [30, 80]
     vertical_min_iv: int = 40  # Down from 50
+    
+    # === FIELD VALIDATORS ===
+    
+    @field_validator('supported_symbols', 'checkpoint_times', 'gamma_symbols', 'gamma_scheduler_times', mode='before')
+    @classmethod
+    def parse_list_fields(cls, v: Union[str, List[str]]) -> List[str]:
+        """Parse comma-separated strings into lists."""
+        if isinstance(v, str):
+            # Handle empty strings
+            if not v.strip():
+                return []
+            # Split by comma and strip whitespace
+            return [item.strip() for item in v.split(',') if item.strip()]
+        return v
+    
+    @field_validator('iron_condor_iv_range', mode='before')
+    @classmethod
+    def parse_int_list_fields(cls, v: Union[str, List[int]]) -> List[int]:
+        """Parse comma-separated strings into list of integers."""
+        if isinstance(v, str):
+            # Handle empty strings
+            if not v.strip():
+                return []
+            # Split by comma, strip whitespace, and convert to int
+            return [int(item.strip()) for item in v.split(',') if item.strip()]
+        return v
     
     # === CONFIGURATION PROPERTIES ===
     
