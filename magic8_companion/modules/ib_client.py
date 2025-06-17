@@ -2,6 +2,7 @@ import asyncio
 from typing import List, Dict, Optional
 from ib_async import IB, Stock, Option, MarketOrder, Contract, util, Position, OptionChain, Ticker, Index
 from ..unified_config import settings
+from .ib_oi_fetcher import IBOpenInterestFetcher  # Import the OI fetcher
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,7 @@ class IBClient:
         self.client_id = client_id
         self.is_connecting = False
         self.connection_lock = asyncio.Lock()
+        self.oi_fetcher = None  # Will be initialized after connection
 
     async def _ensure_connected(self):
         async with self.connection_lock:
@@ -23,6 +25,8 @@ class IBClient:
                 try:
                     await self.ib.connectAsync(self.host, self.port, clientId=self.client_id, timeout=10)
                     print("Successfully connected to IB.")
+                    # Initialize OI fetcher after successful connection
+                    self.oi_fetcher = IBOpenInterestFetcher(self.ib)
                 except asyncio.TimeoutError:
                     print(f"Timeout connecting to IB on {self.host}:{self.port}. Please ensure TWS/Gateway is running and API connections are enabled.")
                 except ConnectionRefusedError:
@@ -175,6 +179,7 @@ class IBClient:
         """
         Return basic option data for ATM options for the given symbols and DTE.
         Enhanced with symbol/exchange fallback logic for better contract qualification.
+        Now includes OI data fetched via streaming.
         """
         await self._ensure_connected()
         options_data = []
@@ -241,6 +246,10 @@ class IBClient:
             # Request market data for qualified options
             tickers_for_options: List[Ticker] = await self.ib.reqTickersAsync(*qualified_options)
 
+            # Store options data and contracts for OI fetching
+            symbol_options_data = []
+            symbol_contracts = []
+
             for ticker in tickers_for_options:
                 contract: Contract = ticker.contract
                 # Get implied volatility
@@ -250,10 +259,8 @@ class IBClient:
                 elif ticker.impliedVolatility is not None and not str(ticker.impliedVolatility) == 'nan':
                     iv = ticker.impliedVolatility
 
-                # Get open interest if available
-                open_interest = getattr(ticker, 'openInterest', None)
-                if open_interest is not None and str(open_interest) == 'nan':
-                    open_interest = None
+                # Don't try to get OI from snapshot - it will be added via streaming
+                open_interest = 0  # Default to 0, will be updated by OI fetcher
 
                 gamma = None
                 delta = None
@@ -263,7 +270,7 @@ class IBClient:
                     if hasattr(ticker.modelGreeks, 'delta') and ticker.modelGreeks.delta is not None and not str(ticker.modelGreeks.delta) == 'nan':
                         delta = ticker.modelGreeks.delta
 
-                options_data.append({
+                option_data = {
                     'symbol': symbol_name,  # Use original symbol name
                     'underlying_symbol': contract.symbol,  # Actual qualified symbol (might be SPXW)
                     'conId': contract.conId,
@@ -273,11 +280,27 @@ class IBClient:
                     'bid': ticker.bid if ticker.bid != -1 else None,
                     'ask': ticker.ask if ticker.ask != -1 else None,
                     'implied_volatility': iv,
-                    'open_interest': open_interest,
+                    'open_interest': open_interest,  # Will be updated by OI fetcher
                     'gamma': gamma,
                     'delta': delta,
                     'underlying_price_at_fetch': spot_price
-                })
+                }
+                
+                symbol_options_data.append(option_data)
+                symbol_contracts.append(contract)
+
+            # Enhance with OI data if we have an OI fetcher
+            if self.oi_fetcher and symbol_options_data:
+                try:
+                    logger.info(f"Fetching OI data for {len(symbol_contracts)} {symbol_name} contracts...")
+                    symbol_options_data = await self.oi_fetcher.enhance_options_with_oi(
+                        symbol_options_data, symbol_contracts
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to fetch OI data for {symbol_name}: {e}")
+                    # Continue with 0 OI values rather than failing completely
+
+            options_data.extend(symbol_options_data)
 
         return options_data
 
@@ -305,8 +328,12 @@ async def example_usage():
         # For 0DTE, days_to_expiry is 0. The function calculates today's date.
         atm_spx_options = await client.get_atm_options(['SPX'], days_to_expiry=0)
         if atm_spx_options:
-            for opt in atm_spx_options:
-                print(f"  SPX Option: K={opt['strike']} {opt['right']}, Bid={opt['bid']}, Ask={opt['ask']}, IV={opt['implied_volatility']:.4f} (if available)")
+            for opt in atm_spx_options[:5]:  # Show first 5 options
+                print(f"  SPX Option: K={opt['strike']} {opt['right']}, "
+                      f"Bid={opt['bid']}, Ask={opt['ask']}, "
+                      f"IV={opt['implied_volatility']:.4f if opt['implied_volatility'] else 'N/A'}, "
+                      f"OI={opt['open_interest']}, "
+                      f"Gamma={opt['gamma']:.6f if opt['gamma'] else 'N/A'}")
         else:
             print("  No ATM SPX options data found.")
 
