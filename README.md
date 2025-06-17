@@ -9,6 +9,8 @@ A simplified trade type recommendation engine that analyzes market conditions an
 - **[ENHANCED_INDICATORS.md](ENHANCED_INDICATORS.md)** - Enhanced features documentation
 - **[SCORING_SYSTEM.md](SCORING_SYSTEM.md)** - Scoring logic reference
 - **[IBKR_TROUBLESHOOTING.md](IBKR_TROUBLESHOOTING.md)** - Interactive Brokers connection troubleshooting
+- **[ENHANCED_GAMMA_MIGRATION_PLAN.md](docs/ENHANCED_GAMMA_MIGRATION_PLAN.md)** - Migration planning document
+- **[ENHANCED_GAMMA_MIGRATION_GUIDE.md](docs/ENHANCED_GAMMA_MIGRATION_GUIDE.md)** - Current migration steps
 
 ## 🚀 New Features
 
