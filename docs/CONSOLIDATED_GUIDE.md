@@ -117,6 +117,9 @@ python scripts/test_runner.py
 # Select option 2 for quick test
 ```
 
+If your directory layout differs, set the `MAGIC8_ROOT` environment variable to
+the Magic8-Companion folder before running the script.
+
 ## Production Workflow
 
 ### Starting the System (3 Terminals)

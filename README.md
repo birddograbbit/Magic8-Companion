@@ -79,6 +79,9 @@ python scripts/test_runner.py
 ./start_magic8_enhanced.sh
 ```
 
+Set the `MAGIC8_ROOT` environment variable if your repository lives outside the
+standard directory layout so the test runner can locate the project correctly.
+
 ## Output Format
 
 The system outputs recommendations to `data/recommendations.json`:
