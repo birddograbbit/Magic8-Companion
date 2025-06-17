@@ -23,16 +23,21 @@ class MarketAnalyzer:
     """Market analyzer supporting IB (primary) and Yahoo Finance (fallback)."""
     
     def __init__(self):
-        self.use_mock_data = settings.use_mock_data
+        # FIX: Use effective_use_mock_data to respect complexity mode
+        self.use_mock_data = settings.effective_use_mock_data
         self.provider = settings.market_data_provider
         self.ib_client_manager = None
         self.iv_history = {}  # Store historical IV for percentile calculation
         self.cache_dir = Path('data')
         
-        # Initialize IB client manager if configured
-        if self.provider == "ib" or not self.use_mock_data:
+        # Log which data source we're using
+        logger.info(f"MarketAnalyzer initialized: use_mock_data={self.use_mock_data}, provider={self.provider}, complexity={settings.system_complexity}")
+        
+        # Initialize IB client manager if configured and not using mock data
+        if self.provider == "ib" and not self.use_mock_data:
             try:
                 self.ib_client_manager = IBClientManager()
+                logger.info("IB client manager initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize IB client manager: {e}")
                 self.ib_client_manager = None
