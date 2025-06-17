@@ -1,7 +1,6 @@
 """
-Analysis modules for Magic8-Companion
+Analysis module for Magic8-Companion.
+Contains all analysis components including gamma analysis.
 """
-
-from . import gamma
 
 __all__ = ['gamma']
