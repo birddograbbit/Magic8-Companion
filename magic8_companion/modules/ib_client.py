@@ -216,15 +216,11 @@ class IBClient:
             else:
                 atm_strike = round(spot_price / 5) * 5  # Default to 5
 
-            # Get a few strikes around ATM
+            # Get a wider range of strikes around ATM for better gamma calculations
             strike_increment = 5 if symbol_name in ['SPX', 'SPXW', 'RUT'] else 1
-            strikes_to_check = [
-                atm_strike - 2 * strike_increment,
-                atm_strike - strike_increment,
-                atm_strike,
-                atm_strike + strike_increment,
-                atm_strike + 2 * strike_increment
-            ]
+            num_strikes_each_side = 20
+            strikes_to_check = [atm_strike + i * strike_increment
+                                for i in range(-num_strikes_each_side, num_strikes_each_side + 1)]
 
             qualified_options = []
             
@@ -259,6 +255,14 @@ class IBClient:
                 if open_interest is not None and str(open_interest) == 'nan':
                     open_interest = None
 
+                gamma = None
+                delta = None
+                if ticker.modelGreeks:
+                    if hasattr(ticker.modelGreeks, 'gamma') and ticker.modelGreeks.gamma is not None and not str(ticker.modelGreeks.gamma) == 'nan':
+                        gamma = ticker.modelGreeks.gamma
+                    if hasattr(ticker.modelGreeks, 'delta') and ticker.modelGreeks.delta is not None and not str(ticker.modelGreeks.delta) == 'nan':
+                        delta = ticker.modelGreeks.delta
+
                 options_data.append({
                     'symbol': symbol_name,  # Use original symbol name
                     'underlying_symbol': contract.symbol,  # Actual qualified symbol (might be SPXW)
@@ -270,6 +274,8 @@ class IBClient:
                     'ask': ticker.ask if ticker.ask != -1 else None,
                     'implied_volatility': iv,
                     'open_interest': open_interest,
+                    'gamma': gamma,
+                    'delta': delta,
                     'underlying_price_at_fetch': spot_price
                 })
 
