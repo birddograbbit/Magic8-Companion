@@ -1,4 +1,5 @@
 import pytest
+import asyncio
 from magic8_companion.modules.combo_scorer import ComboScorer, generate_recommendation
 
 # Test cases for score_combo_types
@@ -41,7 +42,7 @@ score_test_cases = [
 @pytest.mark.parametrize("market_data, expected_scores", score_test_cases)
 def test_score_combo_types_detailed(market_data, expected_scores):
     scorer = ComboScorer()
-    scores = scorer.score_combo_types(market_data, "TEST")
+    scores = asyncio.run(scorer.score_combo_types(market_data, "TEST"))
     assert scores == expected_scores
 
 # Test cases for generate_recommendation
@@ -80,6 +81,6 @@ def test_generate_recommendation_basic_return_type():
         'gamma_environment': 'Range-bound moderate'
     }
     scorer = ComboScorer()
-    scores = scorer.score_combo_types(market, "TEST")
+    scores = asyncio.run(scorer.score_combo_types(market, "TEST"))
     rec = generate_recommendation(scores)
     assert 'recommendation' in rec

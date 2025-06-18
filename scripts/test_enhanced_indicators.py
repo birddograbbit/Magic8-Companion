@@ -66,7 +66,7 @@ async def test_enhanced_scoring():
     print("Strategy Scoring Results:")
     print("="*60)
     
-    results = scorer.score_all_strategies(market_data)
+    results = await scorer.score_all_strategies(market_data)
     
     # Sort by score
     sorted_strategies = sorted(results.items(), key=lambda x: x[1]['score'], reverse=True)
@@ -114,7 +114,7 @@ async def test_enhanced_scoring():
     os.environ['M8C_ENABLE_VOLUME_ANALYSIS'] = 'false'
     
     scorer_basic = EnhancedComboScorer()
-    results_basic = scorer_basic.score_all_strategies(market_data)
+    results_basic = await scorer_basic.score_all_strategies(market_data)
     
     print("\nComparison (Enhanced vs Basic):")
     print(f"{'Strategy':<15} {'Enhanced':>10} {'Basic':>10} {'Difference':>12}")
@@ -197,7 +197,7 @@ async def save_test_results():
         'option_chain': generate_mock_option_chain(5850)
     }
     
-    results = scorer.score_all_strategies(market_data)
+    results = await scorer.score_all_strategies(market_data)
     
     # Create enhanced recommendation format
     recommendation = {

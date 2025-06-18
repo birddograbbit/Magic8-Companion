@@ -71,7 +71,7 @@ class RecommendationEngine:
                     continue
                 
                 # Score combo types using unified scorer
-                scores = self.combo_scorer.score_combo_types(market_data, symbol)
+                scores = await self.combo_scorer.score_combo_types(market_data, symbol)
                 
                 # Build recommendations for ALL strategies
                 recommendation = self._build_all_recommendations(scores, market_data, symbol)

@@ -5,6 +5,7 @@ python-dotenv==1.0.1
 
 # Scheduling
 pytz==2024.2
+schedule==1.2.0  # For gamma scheduler
 
 # Logging
 colorlog==6.8.2
@@ -24,7 +25,7 @@ py-vollib-vectorized==0.1.1
 py_vollib==1.0.1  # Base library for fallback
 
 # Additional Data Processing
-scipy==1.14.1  # For statistical calculations
+scipy==1.14.1  # For statistical calculations (required for gamma analysis)
 scikit-learn==1.5.2  # For data analysis
 
 # Async HTTP for future API calls
