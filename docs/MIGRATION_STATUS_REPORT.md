@@ -60,7 +60,8 @@ M8C_ENABLE_ENHANCED_GEX=true
 M8C_GAMMA_SYMBOLS=SPX                    # or SPX,SPY,QQQ
 M8C_GAMMA_SCHEDULER_MODE=scheduled
 M8C_GAMMA_SCHEDULER_TIMES=10:30,11:00,12:30,14:45
-M8C_DATA_PROVIDER=yahoo                  # or ib, polygon
+M8C_MARKET_DATA_PROVIDER=ib             # yahoo, ib, or polygon
+M8C_DATA_PROVIDER=ib                    # for gamma analysis
 ```
 
 ## Testing Checklist

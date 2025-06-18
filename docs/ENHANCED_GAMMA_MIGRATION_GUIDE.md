@@ -121,7 +121,8 @@ M8C_GAMMA_SCHEDULER_TIMES=10:30,11:00,12:30,14:45
 M8C_GAMMA_MAX_AGE_MINUTES=5
 
 # === DATA PROVIDER ===
-M8C_DATA_PROVIDER=yahoo  # or ib, polygon
+M8C_DATA_PROVIDER=ib  # ib, yahoo, or polygon
+M8C_MARKET_DATA_PROVIDER=ib  # General market data source
 
 # === IMPORTANT: REMOVE THESE OBSOLETE SETTINGS ===
 # M8C_ML_OPTION_TRADING_PATH=../MLOptionTrading  # REMOVE THIS
@@ -190,7 +191,8 @@ M8C_GAMMA_SCHEDULER_TIMES=10:30,11:00   # Times for scheduled mode
 M8C_GAMMA_SCHEDULER_INTERVAL=5          # Minutes for interval mode
 
 # Data provider
-M8C_DATA_PROVIDER=yahoo                 # yahoo, ib, or polygon
+M8C_DATA_PROVIDER=ib                   # ib, yahoo, or polygon
+M8C_MARKET_DATA_PROVIDER=ib            # general market data
 
 # Advanced settings (optional)
 M8C_GEX_0DTE_MULTIPLIER=8.0            # 0DTE option multiplier
