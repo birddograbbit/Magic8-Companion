@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     
     # Core recommendation settings
     output_file_path: str = "data/recommendations.json"
-    supported_symbols: Union[str, List[str]] = ["SPX", "SPY", "QQQ", "RUT"]
-    checkpoint_times: Union[str, List[str]] = ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"]
+    supported_symbols: Union[str, List[str]] = ["SPX"] # ["SPX", "SPY", "QQQ", "RUT"]
+    checkpoint_times: Union[str, List[str]] = ["10:00", "10:10", "10:20", "10:30", "10:40", "10:50", "11:00", "11:10", "11:20", "11:30", "11:40", "11:50", "12:00", "12:10", "12:20", "12:30", "12:40", "12:50", "13:00", "13:10", "13:20", "13:30", "13:40", "13:50", "14:00", "14:10", "14:20", "14:30", "14:40", "14:50"]
     
     # Scoring thresholds - MADE MORE LENIENT
     min_recommendation_score: int = 60  # Down from 70
@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     
     # Gamma scheduler settings
     gamma_scheduler_mode: str = "scheduled"  # scheduled or interval
-    gamma_scheduler_times: Union[str, List[str]] = ["10:30", "11:00", "12:30", "14:45"]
+    gamma_scheduler_times: Union[str, List[str]] = ["10:00", "10:10", "10:20", "10:30", "10:40", "10:50", "11:00", "11:10", "11:20", "11:30", "11:40", "11:50", "12:00", "12:10", "12:20", "12:30", "12:40", "12:50", "13:00", "13:10", "13:20", "13:30", "13:40", "13:50", "14:00", "14:10", "14:20", "14:30", "14:40", "14:50"]
     gamma_scheduler_interval: int = 5  # minutes for interval mode
     
     # Gamma calculation settings - Use string format in .env
