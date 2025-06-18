@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
-from magic8_companion.analysis.gamma.gamma_runner import IntegratedGammaRunner
+from magic8_companion.analysis.gamma.gamma_runner import run_gamma_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,7 @@ class EnhancedGEXWrapper:
     
     def __init__(self):
         """Initialize the enhanced GEX wrapper"""
-        # Initialize the integrated gamma runner
-        self.gamma_runner = IntegratedGammaRunner()
+        # Use the integrated native gamma analysis
         
         # Cache settings
         self.cache_duration_minutes = 5
@@ -74,15 +73,15 @@ class EnhancedGEXWrapper:
                 if external_data:
                     return external_data
             
-            # Run integrated gamma analysis
+            # Run integrated gamma analysis using native implementation
             logger.info(f"Running gamma analysis for {symbol}")
-            analysis = self.gamma_runner.analyze_gamma(symbol)
-            
+            analysis = run_gamma_analysis(symbol, save_results=False)
+
             if analysis:
-                # Cache the results
-                self.last_analysis = analysis
+                formatted = self._format_native_analysis(analysis)
+                self.last_analysis = formatted
                 self.last_analysis_time = datetime.now()
-                return analysis
+                return formatted
             else:
                 logger.warning("Gamma analysis failed")
                 return None
@@ -124,6 +123,30 @@ class EnhancedGEXWrapper:
             logger.debug(f"Could not read external gamma data: {e}")
         
         return None
+
+    def _format_native_analysis(self, analysis: Dict) -> Dict:
+        """Format native gamma analysis for compatibility."""
+        levels = analysis.get('levels', {})
+        regime = analysis.get('regime_analysis', {})
+
+        return {
+            'symbol': analysis.get('symbol'),
+            'timestamp': analysis.get('analysis_timestamp'),
+            'score_adjustments': {},
+            'signals': {
+                'gamma_regime': regime.get('regime', 'unknown'),
+                'bias': regime.get('bias', 'neutral'),
+                'confidence': regime.get('confidence', 'medium'),
+            },
+            'gamma_metrics': {
+                'net_gex': analysis.get('net_gex', 0),
+                'gamma_flip': levels.get('zero_gamma', 0),
+                'call_wall': levels.get('call_wall', 0),
+                'put_wall': levels.get('put_wall', 0),
+                'spot_price': analysis.get('spot_price', 0),
+            },
+            'spot_price': analysis.get('spot_price', 0),
+        }
     
     def calculate_strategy_adjustments(self, strategy: str, gamma_data: Dict) -> float:
         """
@@ -210,14 +233,11 @@ class EnhancedGEXWrapper:
     def is_gamma_analysis_available(self) -> bool:
         """Check if gamma analysis is available"""
         try:
-            # Try to get latest analysis
-            analysis = self.gamma_runner.get_latest_analysis()
-            if analysis:
-                timestamp = datetime.fromisoformat(analysis['timestamp'])
-                age = datetime.now() - timestamp
+            if self.last_analysis_time:
+                age = datetime.now() - self.last_analysis_time
                 return age < timedelta(hours=1)
             return False
-        except:
+        except Exception:
             return False
     
     def get_status(self) -> Dict:
@@ -238,10 +258,9 @@ class EnhancedGEXWrapper:
                 status['last_update'] = data['timestamp']
                 status['data_age_minutes'] = (datetime.now() - timestamp).total_seconds() / 60
             else:
-                analysis = self.gamma_runner.get_latest_analysis()
-                if analysis:
-                    timestamp = datetime.fromisoformat(analysis['timestamp'])
-                    status['last_update'] = analysis['timestamp']
+                if self.last_analysis_time and self.last_analysis:
+                    timestamp = self.last_analysis_time
+                    status['last_update'] = self.last_analysis.get('timestamp')
                     status['data_age_minutes'] = (datetime.now() - timestamp).total_seconds() / 60
         except:
             pass

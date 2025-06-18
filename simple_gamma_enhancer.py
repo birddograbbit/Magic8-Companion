@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
-from magic8_companion.analysis.gamma.gamma_runner import IntegratedGammaRunner
+from magic8_companion.analysis.gamma.gamma_runner import run_gamma_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +19,7 @@ class SimpleGammaEnhancer:
     """Simple gamma enhancement for Magic8 - fully integrated"""
     
     def __init__(self):
-        # Use integrated gamma runner
-        self.gamma_runner = IntegratedGammaRunner()
+        # Use integrated native gamma analysis
         self.cache_duration_minutes = 5
         self.last_analysis = {}
         self.last_analysis_time = {}
@@ -71,7 +70,7 @@ class SimpleGammaEnhancer:
         
         # Run new analysis
         logger.info(f"Running gamma analysis for {symbol}")
-        analysis = self.gamma_runner.analyze_gamma(symbol)
+        analysis = run_gamma_analysis(symbol, save_results=False)
         
         if analysis:
             self.last_analysis[symbol] = analysis
