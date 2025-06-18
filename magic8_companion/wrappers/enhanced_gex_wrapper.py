@@ -49,7 +49,8 @@ class EnhancedGEXWrapper:
                 self.full_gamma_file = ml_path / "data" / "gamma_analysis.json"
                 logger.info("External MLOptionTrading files detected - using compatibility mode")
     
-    async def get_gamma_adjustments(self, symbol: str = 'SPX') -> Optional[Dict]:
+    async def get_gamma_adjustments(self, symbol: str = 'SPX',
+                                    market_data: Optional[Dict] = None) -> Optional[Dict]:
         """
         Get the latest gamma adjustments
         
@@ -66,13 +67,35 @@ class EnhancedGEXWrapper:
                 if age < timedelta(minutes=self.cache_duration_minutes):
                     logger.debug("Using cached gamma analysis")
                     return self.last_analysis
-            
+
             # If in external mode, try reading files first
             if self.external_mode:
                 external_data = self._read_external_data()
                 if external_data:
                     return external_data
-            
+
+            # Use provided market data if available
+            if market_data and market_data.get('option_chain') and market_data.get('current_price'):
+                try:
+                    if not hasattr(self, '_native_analyzer'):
+                        from magic8_companion.modules.native_gex_analyzer import NativeGEXAnalyzer
+                        self._native_analyzer = NativeGEXAnalyzer()
+
+                    analysis = self._native_analyzer.calculate_gamma_exposure(symbol, market_data)
+                    if analysis:
+                        # Normalize keys for formatting
+                        if 'analysis_timestamp' not in analysis:
+                            analysis['analysis_timestamp'] = analysis.get('timestamp')
+                        if 'spot_price' not in analysis:
+                            analysis['spot_price'] = market_data.get('current_price')
+
+                        formatted = self._format_native_analysis(analysis)
+                        self.last_analysis = formatted
+                        self.last_analysis_time = datetime.now()
+                        return formatted
+                except Exception as e:
+                    logger.warning(f"Native gamma analysis failed for {symbol}: {e}")
+
             # Run integrated gamma analysis using native implementation
             logger.info(f"Running gamma analysis for {symbol}")
             analysis = await run_gamma_analysis(symbol, save_results=False)

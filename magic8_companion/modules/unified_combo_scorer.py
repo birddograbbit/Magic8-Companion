@@ -293,7 +293,7 @@ class UnifiedComboScorer:
             
             # Apply GEX adjustments (enhanced or standard)
             if hasattr(self, 'enhanced_gex_wrapper') or hasattr(self, 'gex_wrapper'):
-                gex_adj = await self._calculate_gex_adjustments(market_data)
+                gex_adj = await self._calculate_gex_adjustments(market_data, symbol)
                 for strategy in enhanced_scores:
                     enhanced_scores[strategy] += gex_adj.get(strategy, 0)
             
@@ -317,14 +317,17 @@ class UnifiedComboScorer:
         # Placeholder - would implement actual Greeks logic here
         return {"Butterfly": 0, "Iron_Condor": 0, "Vertical": 0}
     
-    async def _calculate_gex_adjustments(self, market_data: Dict) -> Dict[str, float]:
+    async def _calculate_gex_adjustments(self, market_data: Dict, symbol: str) -> Dict[str, float]:
         """Calculate GEX-based scoring adjustments using enhanced gamma analysis."""
         
         try:
             # Try enhanced GEX wrapper first if available
             if hasattr(self, 'enhanced_gex_wrapper'):
                 # Get gamma adjustments using integrated analysis
-                gamma_data = await self.enhanced_gex_wrapper.get_gamma_adjustments()
+                gamma_data = await self.enhanced_gex_wrapper.get_gamma_adjustments(
+                    symbol=symbol,
+                    market_data=market_data
+                )
                 
                 if gamma_data:
                     # Apply sophisticated adjustments from MLOptionTrading
