@@ -7,6 +7,7 @@ import json
 import os
 from typing import Dict, Optional, List
 from datetime import datetime
+import asyncio
 import sys
 
 # Add parent directory to path for imports
@@ -23,10 +24,10 @@ from magic8_companion.unified_config import settings
 logger = logging.getLogger(__name__)
 
 
-def run_gamma_analysis(symbol: str, 
-                      data_provider: Optional[str] = None,
-                      save_results: bool = True,
-                      output_dir: str = "data/gamma_analysis") -> Optional[Dict]:
+async def run_gamma_analysis(symbol: str,
+                             data_provider: Optional[str] = None,
+                             save_results: bool = True,
+                             output_dir: str = "data/gamma_analysis") -> Optional[Dict]:
     """
     Run complete gamma analysis for a symbol.
     
@@ -44,20 +45,20 @@ def run_gamma_analysis(symbol: str,
         
         # Get data provider
         provider = get_provider(data_provider)
-        if not provider.is_connected():
+        if not await provider.is_connected():
             logger.error(f"Data provider {data_provider or settings.data_provider} not connected")
             return None
         
         # Get option chain data
         logger.info(f"Fetching option chain for {symbol}")
-        market_data = provider.get_option_chain(symbol)
+        market_data = await provider.get_option_chain(symbol)
         
         if not market_data or 'option_chain' not in market_data:
             logger.error(f"No option chain data available for {symbol}")
             return None
         
         # Get spot price
-        spot_price = market_data.get('current_price') or provider.get_spot_price(symbol)
+        spot_price = market_data.get('current_price') or await provider.get_spot_price(symbol)
         if not spot_price:
             logger.error(f"No spot price available for {symbol}")
             return None
@@ -110,8 +111,8 @@ def run_gamma_analysis(symbol: str,
         return None
 
 
-def run_batch_gamma_analysis(symbols: Optional[List[str]] = None,
-                           data_provider: Optional[str] = None) -> Dict[str, Dict]:
+async def run_batch_gamma_analysis(symbols: Optional[List[str]] = None,
+                                   data_provider: Optional[str] = None) -> Dict[str, Dict]:
     """
     Run gamma analysis for multiple symbols.
     
@@ -129,7 +130,7 @@ def run_batch_gamma_analysis(symbols: Optional[List[str]] = None,
     
     for symbol in symbols:
         logger.info(f"Running batch analysis for {symbol}")
-        result = run_gamma_analysis(symbol, data_provider)
+        result = await run_gamma_analysis(symbol, data_provider)
         if result:
             results[symbol] = result
         else:
@@ -202,10 +203,12 @@ if __name__ == "__main__":
     )
     
     # Run analysis
-    results = run_gamma_analysis(
-        symbol=args.symbol,
-        data_provider=args.provider,
-        save_results=not args.no_save
+    results = asyncio.run(
+        run_gamma_analysis(
+            symbol=args.symbol,
+            data_provider=args.provider,
+            save_results=not args.no_save,
+        )
     )
     
     if results:

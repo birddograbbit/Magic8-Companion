@@ -91,7 +91,7 @@ async def test_real_market_data(symbols: list = None):
             # Score strategies
             if 'option_chain' in market_data and market_data['option_chain']:
                 print(f"\nStrategy Scores:")
-                results = scorer.score_all_strategies(market_data)
+                results = await scorer.score_all_strategies(market_data)
                 
                 # Sort by score
                 sorted_strategies = sorted(results.items(), key=lambda x: x[1]['score'], reverse=True)

@@ -26,8 +26,8 @@ class ComboScorer:
     def __init__(self):
         self._scorer = create_scorer("simple")
     
-    def score_combo_types(self, market_data, symbol):
-        return self._scorer.score_combo_types(market_data, symbol)
+    async def score_combo_types(self, market_data, symbol):
+        return await self._scorer.score_combo_types(market_data, symbol)
 
 # Maintain backward compatibility
 __all__ = ['ComboScorer']

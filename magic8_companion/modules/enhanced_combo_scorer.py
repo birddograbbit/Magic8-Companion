@@ -26,13 +26,13 @@ class EnhancedComboScorer:
     def __init__(self):
         self._scorer = create_scorer("enhanced")
     
-    def score_combo_types(self, market_data, symbol):
-        return self._scorer.score_combo_types(market_data, symbol)
+    async def score_combo_types(self, market_data, symbol):
+        return await self._scorer.score_combo_types(market_data, symbol)
     
-    def score_all_strategies(self, market_data):
+    async def score_all_strategies(self, market_data):
         """Legacy method for backward compatibility."""
         symbol = market_data.get('symbol', 'SPX')
-        scores = self._scorer.score_combo_types(market_data, symbol)
+        scores = await self._scorer.score_combo_types(market_data, symbol)
         
         # Convert to old format
         results = {}
