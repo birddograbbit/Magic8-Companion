@@ -13,17 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class DataProvider(Protocol):
-    """Protocol for data providers."""
+    """Protocol for asynchronous data providers."""
 
-    def get_option_chain(self, symbol: str) -> Dict[str, Any]:
+    async def get_option_chain(self, symbol: str) -> Dict[str, Any]:
         """Get option chain data for a symbol."""
         ...
 
-    def get_spot_price(self, symbol: str) -> float:
+    async def get_spot_price(self, symbol: str) -> float:
         """Get current spot price for a symbol."""
         ...
 
-    def is_connected(self) -> bool:
+    async def is_connected(self) -> bool:
         """Check if provider is connected and ready."""
         ...
 
@@ -34,20 +34,6 @@ class IBDataProvider:
     def __init__(self):
         self.connected = False
         self.manager = IBClientManager()
-        self._check_connection()
-
-    def _check_connection(self):
-        """Check IB connection status."""
-        try:
-            client = asyncio.run(self.manager.get_client())
-            if client:
-                asyncio.run(client._ensure_connected())
-                self.connected = client.ib.isConnected()
-            else:
-                self.connected = False
-        except Exception as e:
-            logger.warning(f"IB connection failed: {e}")
-            self.connected = False
 
     async def _fetch_option_chain(self, symbol: str) -> Dict[str, Any]:
         """Internal async helper to fetch option chain and spot price."""
@@ -136,45 +122,48 @@ class IBDataProvider:
             return price
         raise ValueError("No market price available")
 
-    def get_option_chain(self, symbol: str) -> Dict[str, Any]:
+    async def get_option_chain(self, symbol: str) -> Dict[str, Any]:
         """Get option chain from IB."""
-        if not self.is_connected():
+        if not await self.is_connected():
             if settings.ibkr_fallback_to_yahoo:
                 logger.info("IB not connected, falling back to Yahoo")
-                return YahooDataProvider().get_option_chain(symbol)
+                return await YahooDataProvider().get_option_chain(symbol)
             raise ConnectionError("IB not connected")
 
         try:
-            return asyncio.run(self._fetch_option_chain(symbol))
+            return await self._fetch_option_chain(symbol)
         except Exception as e:
             logger.warning(f"IB option chain fetch failed: {e}")
             if settings.ibkr_fallback_to_yahoo:
                 logger.info("Falling back to Yahoo for option chain")
-                return YahooDataProvider().get_option_chain(symbol)
+                return await YahooDataProvider().get_option_chain(symbol)
             raise
 
-    def get_spot_price(self, symbol: str) -> float:
+    async def get_spot_price(self, symbol: str) -> float:
         """Get spot price from IB."""
-        if not self.is_connected():
+        if not await self.is_connected():
             if settings.ibkr_fallback_to_yahoo:
                 logger.info("IB not connected, falling back to Yahoo")
-                return YahooDataProvider().get_spot_price(symbol)
+                return await YahooDataProvider().get_spot_price(symbol)
             raise ConnectionError("IB not connected")
 
         try:
-            return asyncio.run(self._fetch_spot_price(symbol))
+            return await self._fetch_spot_price(symbol)
         except Exception as e:
             logger.warning(f"IB spot price fetch failed: {e}")
             if settings.ibkr_fallback_to_yahoo:
                 logger.info("Falling back to Yahoo for spot price")
-                return YahooDataProvider().get_spot_price(symbol)
+                return await YahooDataProvider().get_spot_price(symbol)
             raise
 
-    def is_connected(self) -> bool:
+    async def is_connected(self) -> bool:
         """Check connection status by verifying IB client."""
         try:
-            client = asyncio.run(self.manager.get_client())
-            return client is not None and client.ib.isConnected()
+            client = await self.manager.get_client()
+            if client:
+                await client._ensure_connected()
+                return client.ib.isConnected()
+            return False
         except Exception:
             return False
 
@@ -185,17 +174,17 @@ class YahooDataProvider:
     def __init__(self):
         self.connected = True  # Yahoo is always "connected"
 
-    def get_option_chain(self, symbol: str) -> Dict[str, Any]:
+    async def get_option_chain(self, symbol: str) -> Dict[str, Any]:
         """Get option chain from Yahoo Finance."""
         # Would use yfinance here
         return {"symbol": symbol, "option_chain": []}
 
-    def get_spot_price(self, symbol: str) -> float:
+    async def get_spot_price(self, symbol: str) -> float:
         """Get spot price from Yahoo."""
         # Would use yfinance
         return 0.0
 
-    def is_connected(self) -> bool:
+    async def is_connected(self) -> bool:
         """Yahoo is always available."""
         return True
 
@@ -207,7 +196,7 @@ class FileDataProvider:
         self.cache_path = cache_path
         self.connected = True
 
-    def get_option_chain(self, symbol: str) -> Dict[str, Any]:
+    async def get_option_chain(self, symbol: str) -> Dict[str, Any]:
         """Get option chain from cached file."""
         import json
         import os
@@ -219,12 +208,12 @@ class FileDataProvider:
 
         return {"symbol": symbol, "option_chain": []}
 
-    def get_spot_price(self, symbol: str) -> float:
+    async def get_spot_price(self, symbol: str) -> float:
         """Get spot price from cache."""
-        data = self.get_option_chain(symbol)
+        data = await self.get_option_chain(symbol)
         return data.get("current_price", 0.0)
 
-    def is_connected(self) -> bool:
+    async def is_connected(self) -> bool:
         """File provider is always ready."""
         return True
 
@@ -246,12 +235,7 @@ def get_provider(provider_name: Optional[str] = None) -> DataProvider:
     provider_name = provider_name.lower()
 
     if provider_name == "ib":
-        provider = IBDataProvider()
-        # Fallback to Yahoo if IB not connected and fallback enabled
-        if not provider.is_connected() and settings.ibkr_fallback_to_yahoo:
-            logger.info("IB not connected, falling back to Yahoo")
-            return YahooDataProvider()
-        return provider
+        return IBDataProvider()
 
     elif provider_name == "yahoo":
         return YahooDataProvider()

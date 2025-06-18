@@ -154,7 +154,7 @@ class UnifiedComboScorer:
                 logger.warning("Volume wrapper not available")
                 self.enable_volume_analysis = False
     
-    def score_combo_types(self, market_data: Dict, symbol: str) -> Dict[str, float]:
+    async def score_combo_types(self, market_data: Dict, symbol: str) -> Dict[str, float]:
         """
         Score all combo types based on market conditions.
         
@@ -175,7 +175,7 @@ class UnifiedComboScorer:
         
         # Apply enhancements if in enhanced mode
         if self.complexity == ScorerComplexity.ENHANCED:
-            scores = self._apply_enhancements(scores, market_data, symbol)
+            scores = await self._apply_enhancements(scores, market_data, symbol)
         
         logger.debug(f"{symbol} scores ({self.complexity.value}): {scores}")
         return scores
@@ -279,8 +279,8 @@ class UnifiedComboScorer:
         
         return min(score, 100)
     
-    def _apply_enhancements(self, base_scores: Dict[str, float], 
-                          market_data: Dict, symbol: str) -> Dict[str, float]:
+    async def _apply_enhancements(self, base_scores: Dict[str, float],
+                                  market_data: Dict, symbol: str) -> Dict[str, float]:
         """Apply enhanced indicators to base scores."""
         enhanced_scores = base_scores.copy()
         
@@ -293,7 +293,7 @@ class UnifiedComboScorer:
             
             # Apply GEX adjustments (enhanced or standard)
             if hasattr(self, 'enhanced_gex_wrapper') or hasattr(self, 'gex_wrapper'):
-                gex_adj = self._calculate_gex_adjustments(market_data)
+                gex_adj = await self._calculate_gex_adjustments(market_data)
                 for strategy in enhanced_scores:
                     enhanced_scores[strategy] += gex_adj.get(strategy, 0)
             
@@ -317,14 +317,14 @@ class UnifiedComboScorer:
         # Placeholder - would implement actual Greeks logic here
         return {"Butterfly": 0, "Iron_Condor": 0, "Vertical": 0}
     
-    def _calculate_gex_adjustments(self, market_data: Dict) -> Dict[str, float]:
+    async def _calculate_gex_adjustments(self, market_data: Dict) -> Dict[str, float]:
         """Calculate GEX-based scoring adjustments using enhanced gamma analysis."""
         
         try:
             # Try enhanced GEX wrapper first if available
             if hasattr(self, 'enhanced_gex_wrapper'):
-                # Get gamma adjustments from MLOptionTrading
-                gamma_data = self.enhanced_gex_wrapper.get_gamma_adjustments()
+                # Get gamma adjustments using integrated analysis
+                gamma_data = await self.enhanced_gex_wrapper.get_gamma_adjustments()
                 
                 if gamma_data:
                     # Apply sophisticated adjustments from MLOptionTrading

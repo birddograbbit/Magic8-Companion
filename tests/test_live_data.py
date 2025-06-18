@@ -36,7 +36,7 @@ async def test_live_data_for_symbol(symbol: str):
             
             # Test combo scoring with live data
             scorer = ComboScorer()
-            scores = scorer.score_combo_types(market_data, symbol)
+            scores = await scorer.score_combo_types(market_data, symbol)
             
             print(f"\n📊 Combo Scores for {symbol}:")
             for strategy, score in scores.items():

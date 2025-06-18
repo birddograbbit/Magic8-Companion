@@ -49,7 +49,7 @@ class EnhancedGEXWrapper:
                 self.full_gamma_file = ml_path / "data" / "gamma_analysis.json"
                 logger.info("External MLOptionTrading files detected - using compatibility mode")
     
-    def get_gamma_adjustments(self, symbol: str = 'SPX') -> Optional[Dict]:
+    async def get_gamma_adjustments(self, symbol: str = 'SPX') -> Optional[Dict]:
         """
         Get the latest gamma adjustments
         
@@ -75,7 +75,7 @@ class EnhancedGEXWrapper:
             
             # Run integrated gamma analysis using native implementation
             logger.info(f"Running gamma analysis for {symbol}")
-            analysis = run_gamma_analysis(symbol, save_results=False)
+            analysis = await run_gamma_analysis(symbol, save_results=False)
 
             if analysis:
                 formatted = self._format_native_analysis(analysis)
@@ -209,7 +209,7 @@ class EnhancedGEXWrapper:
             'put_wall': metrics.get('put_wall', 0)
         }
     
-    def get_key_levels(self, symbol: str = 'SPX') -> Optional[Dict]:
+    async def get_key_levels(self, symbol: str = 'SPX') -> Optional[Dict]:
         """
         Get key gamma levels (walls, flip point)
         
@@ -219,7 +219,7 @@ class EnhancedGEXWrapper:
         Returns:
             Key levels dictionary
         """
-        gamma_data = self.get_gamma_adjustments(symbol)
+        gamma_data = await self.get_gamma_adjustments(symbol)
         if not gamma_data:
             return None
         
