@@ -25,6 +25,9 @@ All components have been successfully migrated and implemented natively in Magic
    - Comma-separated: `M8C_GAMMA_SYMBOLS=SPX,SPY,QQQ`
    - JSON array: `M8C_GAMMA_SYMBOLS=["SPX","SPY","QQQ"]`
    - Both formats now work seamlessly
+4. **MarketAnalyzer Cache Integration**
+   - Gamma analysis now reuses cached option-chain data from `MarketAnalyzer`.
+   - UnifiedComboScorer no longer triggers a second option-chain fetch.
 
 ## What Was Migrated
 
