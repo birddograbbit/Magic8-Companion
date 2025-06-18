@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     mock_expected_range_pct: float = 0.008  # 0.8%
     
     # Live data provider selection
-    market_data_provider: str = "yahoo"  # yahoo, ib, or polygon
+    market_data_provider: str = "ib"  # yahoo, ib, or polygon
     data_provider: str = "ib"  # For gamma analysis: ib, yahoo, polygon
     
     # Time zone
