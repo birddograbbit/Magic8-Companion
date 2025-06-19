@@ -44,6 +44,7 @@ The Enhanced Gamma Exposure (GEX) functionality has been successfully migrated f
 2. **Created test scripts**:
    - `test_gamma_migration.py` - Comprehensive test suite
    - `quick_gamma_test.py` - Quick validation script
+3. **Gamma wall detection bug fixed** - Call wall and put wall now use net GEX levels
 
 ## Configuration Changes Required
 

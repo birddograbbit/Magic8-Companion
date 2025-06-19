@@ -28,6 +28,9 @@ All components have been successfully migrated and implemented natively in Magic
 4. **MarketAnalyzer Cache Integration**
    - Gamma analysis now reuses cached option-chain data from `MarketAnalyzer`.
    - UnifiedComboScorer no longer triggers a second option-chain fetch.
+5. **Gamma Wall Detection Fix**
+   - Call wall now searches for the highest positive **net** GEX above spot.
+   - Put wall now uses the most negative **net** GEX below spot.
 
 ## What Was Migrated
 
