@@ -41,6 +41,10 @@ class MarketAnalyzer:
             except Exception as e:
                 logger.warning(f"Failed to initialize IB client manager: {e}")
                 self.ib_client_manager = None
+
+        # Path to cache file
+        self.cache_file = self.cache_dir / "market_data_cache.json"
+        self.cache_max_age = 300  # seconds
     
     def _write_market_data_cache(self, symbol: str, market_data: Dict, option_chain_data: Optional[List] = None):
         """Write market data to cache for sharing with other modules."""
@@ -79,11 +83,60 @@ class MarketAnalyzer:
             
         except Exception as e:
             logger.error(f"Error writing market data cache: {e}")
+
+    def _check_cache(self, symbol: str):
+        """Check if valid cache data exists for symbol"""
+        try:
+            if not self.cache_file.exists():
+                logger.debug("Cache file not found - ensure Magic8-Companion is running")
+                return None
+
+            with open(self.cache_file, 'r') as f:
+                try:
+                    cache = json.load(f)
+                except Exception as e:
+                    logger.error(f"Error parsing cache file: {e}")
+                    return None
+
+            if 'timestamp' not in cache or 'data' not in cache:
+                logger.debug("Cache missing required fields")
+                return None
+
+            if symbol not in cache['data']:
+                logger.debug(f"Symbol {symbol} not found in cache")
+                return None
+
+            try:
+                cache_time = datetime.fromisoformat(cache['timestamp'])
+            except Exception:
+                logger.debug("Invalid cache timestamp")
+                return None
+
+            age_seconds = (datetime.now() - cache_time).total_seconds()
+
+            if age_seconds > self.cache_max_age:
+                logger.debug(f"Cache too old: {age_seconds:.1f}s > {self.cache_max_age}s")
+                return None
+
+            source = cache.get('source', 'unknown')
+            logger.info(f"Using cached {source.upper()} data for {symbol} (age: {age_seconds:.1f}s)")
+
+            return cache['data'][symbol]
+
+        except Exception as e:
+            logger.error(f"Error reading cache: {e}")
+            return None
         
     async def analyze_symbol(self, symbol: str) -> Optional[Dict]:
         """Analyze market conditions for a symbol."""
         logger.debug(f"Analyzing market conditions for {symbol}")
-        
+
+        # Return cached data if valid and not using mock data
+        if not self.use_mock_data:
+            cached = self._check_cache(symbol)
+            if cached:
+                return cached
+
         if self.use_mock_data:
             market_data = self._get_mock_market_data(symbol)
         else:

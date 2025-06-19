@@ -164,17 +164,27 @@ class GammaExposureAnalyzer:
         else:
             gamma_flip = spot
 
-        # Call wall (highest positive gamma above spot)
+        # Call wall: strike with highest positive NET GEX above spot
+        # Dealers are typically short calls, so call GEX is negative.
+        # We use net GEX (calls + puts) to find actual resistance levels.
         call_df = df[df['strike'] > spot]
-        if len(call_df) > 0 and len(call_df[call_df['gex'] > 0]) > 0:
-            call_wall = call_df.loc[call_df['gex'].idxmax(), 'strike']
+        if len(call_df) > 0:
+            positive_gex = call_df[call_df['gex'] > 0]
+            if len(positive_gex) > 0:
+                call_wall = positive_gex.loc[positive_gex['gex'].idxmax(), 'strike']
+            else:
+                call_wall = spot + 50
         else:
             call_wall = spot + 50
 
-        # Put wall (highest negative gamma below spot)  
+        # Put wall: strike with most negative NET GEX below spot
         put_df = df[df['strike'] < spot]
-        if len(put_df) > 0 and len(put_df[put_df['gex'] < 0]) > 0:
-            put_wall = put_df.loc[put_df['gex'].idxmin(), 'strike']
+        if len(put_df) > 0:
+            negative_gex = put_df[put_df['gex'] < 0]
+            if len(negative_gex) > 0:
+                put_wall = negative_gex.loc[negative_gex['gex'].idxmin(), 'strike']
+            else:
+                put_wall = spot - 50
         else:
             put_wall = spot - 50
 
