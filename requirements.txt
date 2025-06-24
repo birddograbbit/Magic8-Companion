@@ -39,3 +39,18 @@ numba==0.60.0  # For performance optimization (optional)
 
 # Data Validation
 marshmallow==3.23.2  # For data schema validation
+
+# === ML INTEGRATION (from MLOptionTrading) ===
+
+# Machine Learning stack
+xgboost==2.0.3             # Gradient boosting models
+
+# Data Processing for ML
+pyarrow>=14.0.0            # Parquet file support (fast I/O)
+
+# Visualization
+matplotlib==3.9.0          # Plotting library
+seaborn==0.13.0            # Statistical data visualization
+
+# Discord integration (optional)
+discord.py==2.3.2          # Discord API client (for ML data collection)
