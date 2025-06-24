@@ -14,6 +14,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# If logging has not yet been configured by the application, set up a basic
+# configuration that respects the M8C_LOG_LEVEL environment variable. This
+# allows debugging output from this helper when used standalone.
+if not logging.getLogger().hasHandlers():
+    _level = os.getenv("M8C_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(level=getattr(logging, _level, logging.INFO))
+
 class MLEnhancedScoring:
     """
     Drop-in replacement for Magic8-Companion scorer with ML enhancement
@@ -170,6 +177,10 @@ class MLEnhancedScoring:
                 'close': market_data['vix']
             }], index=[current_time])
             ml_data['vix_data'] = vix_data
+        logger.debug(f"ML data keys: {list(ml_data.keys())}")
+        for k, df in ml_data.items():
+            if isinstance(df, pd.DataFrame):
+                logger.debug(f"{k} shape: {df.shape}")
         
         return ml_data
     
