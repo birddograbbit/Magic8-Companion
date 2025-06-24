@@ -5,6 +5,7 @@ A simplified trade type recommendation engine that analyzes market conditions an
 ## 📚 Documentation
 
 - **[CONSOLIDATED_GUIDE.md](docs/CONSOLIDATED_GUIDE.md)** - Complete system setup and operation guide
+- **[ML_INTEGRATION_GUIDE.md](docs/ML_INTEGRATION_GUIDE.md)** - **NEW!** MLOptionTrading ML integration
 - **[INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md)** - DiscordTrading integration details
 - **[ENHANCED_INDICATORS.md](ENHANCED_INDICATORS.md)** - Enhanced features documentation
 - **[SCORING_SYSTEM.md](SCORING_SYSTEM.md)** - Scoring logic reference
@@ -13,6 +14,12 @@ A simplified trade type recommendation engine that analyzes market conditions an
 - **[ENHANCED_GAMMA_MIGRATION_GUIDE.md](docs/ENHANCED_GAMMA_MIGRATION_GUIDE.md)** - Current migration steps
 
 ## 🚀 New Features
+
+### ML Enhancement Integration (NEW!)
+- **Two-Stage ML Models**: Direction + Volatility prediction from MLOptionTrading
+- **35% ML / 65% Rules**: Balanced approach combining ML with proven rules
+- **2.5 Years Training Data**: Based on profitable Discord trading history
+- See **[ML_INTEGRATION_GUIDE.md](docs/ML_INTEGRATION_GUIDE.md)** for setup
 
 ### Gamma Enhancement Integration
 - Integration with MLOptionTrading for gamma exposure analysis
@@ -34,18 +41,22 @@ A simplified trade type recommendation engine that analyzes market conditions an
 Magic8-Companion is a lightweight companion service that:
 - Analyzes market conditions at scheduled checkpoints (10:30, 11:00, 12:30, 14:45 ET)
 - Determines which trade type (Butterfly, Iron Condor, Vertical) is most favorable
-- Integrates with MLOptionTrading for gamma-based enhancements
+- Integrates with MLOptionTrading for ML-enhanced predictions
 - Outputs recommendations to a JSON file for consumption by DiscordTrading
 - Supports both mock data (for testing) and live market data
 
 ## Architecture
 
 ```
-MLOptionTrading (Gamma Analysis) → gamma_adjustments.json
-                                         ↓
-Magic8-Companion (Enhanced Scoring) → recommendations.json
-                                         ↓
-DiscordTrading (Trade Execution) ← Discord Signals
+Discord Trading History → MLOptionTrading (ML Training)
+                                    ↓
+                           Two-Stage ML Models
+                                    ↓
+Magic8-Companion (Rule Scoring) ← ML Enhanced Scoring (35%)
+                                    ↓
+                           recommendations.json
+                                    ↓
+                           DiscordTrading
 ```
 
 ## Quick Start
@@ -74,6 +85,7 @@ nano .env
 
 Key configuration options:
 - `M8C_USE_MOCK_DATA`: Set to `false` for live data
+- `M8C_ENABLE_ML_INTEGRATION`: Set to `true` for ML predictions
 - `M8C_ENABLE_GAMMA_INTEGRATION`: Set to `true` for gamma enhancements
 - `M8C_MIN_RECOMMENDATION_SCORE`: Lower to 65 for more recommendations
 
@@ -82,6 +94,10 @@ Key configuration options:
 ```bash
 # Test basic functionality
 python scripts/test_runner.py
+
+# Test with ML integration
+cp ../MLOptionTrading/magic8_ml_integration.py ./
+python scripts/test_runner.py  # Select option 4
 
 # Test with gamma integration
 ./start_magic8_enhanced.sh
@@ -107,7 +123,8 @@ The system outputs recommendations to `data/recommendations.json`:
           "confidence": "HIGH",
           "should_trade": true,
           "rationale": "Low volatility environment with gamma support",
-          "gamma_adjustment": 15
+          "gamma_adjustment": 15,
+          "ml_contribution": 25
         }
       },
       "best_strategy": "Butterfly",
@@ -125,9 +142,10 @@ The system outputs recommendations to `data/recommendations.json`:
 ## Integration Points
 
 ### With MLOptionTrading
-- Reads gamma adjustments from `../MLOptionTrading/data/gamma_adjustments.json`
-- Applies gamma-based scoring enhancements
-- Supports real-time gamma regime detection
+- Reads trained models from `../MLOptionTrading/models/`
+- Applies ML predictions to enhance rule-based scoring
+- Supports real-time feature engineering
+- See **[ML_INTEGRATION_GUIDE.md](docs/ML_INTEGRATION_GUIDE.md)** for details
 
 ### With DiscordTrading
 - Outputs recommendations to `data/recommendations.json`
@@ -162,7 +180,8 @@ Magic8-Companion/
 │   └── utils/              # Utilities
 ├── scripts/                # Test and utility scripts
 ├── docs/                   # Documentation
-│   └── CONSOLIDATED_GUIDE.md  # Complete system guide
+│   ├── CONSOLIDATED_GUIDE.md     # Complete system guide
+│   └── ML_INTEGRATION_GUIDE.md   # ML integration guide
 ├── data/                   # Output directory
 └── tests/                  # Unit tests
 ```
@@ -171,10 +190,12 @@ Magic8-Companion/
 
 For detailed troubleshooting, see:
 - **[CONSOLIDATED_GUIDE.md](docs/CONSOLIDATED_GUIDE.md)** - General issues
+- **[ML_INTEGRATION_GUIDE.md](docs/ML_INTEGRATION_GUIDE.md)** - ML integration issues
 - **[IBKR_TROUBLESHOOTING.md](IBKR_TROUBLESHOOTING.md)** - IBKR-specific issues
 
 Common issues:
 - **No recommendations**: Lower `M8C_MIN_RECOMMENDATION_SCORE` to 65
+- **No ML predictions**: Ensure MLOptionTrading models are trained
 - **No gamma data**: Ensure MLOptionTrading is running
 - **All trades skipped**: Check confidence thresholds and strategy mapping
 - **IBKR connection errors**: See IBKR troubleshooting guide
@@ -191,7 +212,7 @@ Options:
 1. Environment Check
 2. Quick Test
 3. Live Data Test
-4. Integration Test
+4. Integration Test (includes ML)
 5. Monitor Live System
 
 ## License
@@ -202,6 +223,7 @@ MIT License - See LICENSE file for details
 
 For issues or questions:
 - Check **[CONSOLIDATED_GUIDE.md](docs/CONSOLIDATED_GUIDE.md)** first
+- For ML issues, see **[ML_INTEGRATION_GUIDE.md](docs/ML_INTEGRATION_GUIDE.md)**
 - For IBKR issues, see **[IBKR_TROUBLESHOOTING.md](IBKR_TROUBLESHOOTING.md)**
 - Open a GitHub issue
 - Review test scripts for examples
