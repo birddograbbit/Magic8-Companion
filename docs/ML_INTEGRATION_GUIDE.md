@@ -84,7 +84,16 @@ M8C_ML_PATH=../MLOptionTrading
 M8C_MIN_RECOMMENDATION_SCORE=65  # Lowered from 75
 ```
 
-3. **Modify the unified main to use ML scorer**:
+3. **Expose settings in `unified_config.py`**:
+```python
+class Settings(BaseSettings):
+    # ML Integration
+    enable_ml_integration: bool = Field(False, env='M8C_ENABLE_ML_INTEGRATION')
+    ml_weight: float = Field(0.35, env='M8C_ML_WEIGHT')
+    ml_path: str = Field('../MLOptionTrading', env='M8C_ML_PATH')
+```
+
+4. **Modify the unified main to use ML scorer**:
 
 Edit `magic8_companion/unified_main.py` to integrate ML:
 
@@ -99,10 +108,11 @@ def __init__(self):
         from magic8_ml_integration import MLEnhancedScoring
         base_scorer = create_scorer(settings.get_scorer_mode())
         self.combo_scorer = MLEnhancedScoring(
-            base_scorer, 
+            base_scorer,
             ml_option_trading_path=settings.ml_path
         )
-        logger.info("ML-enhanced scoring enabled")
+        self.combo_scorer.set_ml_weight(settings.ml_weight)
+        logger.info(f"ML-enhanced scoring enabled (weight: {settings.ml_weight})")
     else:
         self.combo_scorer = create_scorer(settings.get_scorer_mode())
     

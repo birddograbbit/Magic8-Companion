@@ -44,14 +44,38 @@ logger = setup_logging()
 
 class RecommendationEngine:
     """Unified recommendation engine for trade type analysis."""
-    
+
     def __init__(self):
         # Initialize with mode-appropriate components
         self.market_analyzer = MarketAnalyzer()
-        self.combo_scorer = create_scorer(settings.get_scorer_mode())
+
+        # Check if ML integration is enabled
+        if hasattr(settings, 'enable_ml_integration') and settings.enable_ml_integration:
+            try:
+                import sys
+                sys.path.insert(0, '.')
+                from magic8_ml_integration import MLEnhancedScoring
+
+                base_scorer = create_scorer(settings.get_scorer_mode())
+                self.combo_scorer = MLEnhancedScoring(
+                    base_scorer,
+                    ml_option_trading_path=settings.ml_path
+                )
+
+                if hasattr(settings, 'ml_weight'):
+                    self.combo_scorer.set_ml_weight(settings.ml_weight)
+
+                logger.info(f"ML-enhanced scoring enabled (weight: {settings.ml_weight})")
+            except Exception as e:
+                logger.warning(f"Failed to initialize ML integration: {e}")
+                logger.info("Falling back to rule-based scoring")
+                self.combo_scorer = create_scorer(settings.get_scorer_mode())
+        else:
+            self.combo_scorer = create_scorer(settings.get_scorer_mode())
+
         self.output_file = Path(settings.output_file_path)
         self.supported_symbols = settings.supported_symbols
-        
+
         logger.info(f"Initialized in {settings.system_complexity} mode")
         logger.info(f"Scorer mode: {settings.get_scorer_mode()}")
         

@@ -86,6 +86,8 @@ nano .env
 Key configuration options:
 - `M8C_USE_MOCK_DATA`: Set to `false` for live data
 - `M8C_ENABLE_ML_INTEGRATION`: Set to `true` for ML predictions
+- `M8C_ML_WEIGHT`: Adjust ML influence (0.0-1.0, default `0.35`)
+- `M8C_ML_PATH`: Path to the `MLOptionTrading` repository
 - `M8C_ENABLE_GAMMA_INTEGRATION`: Set to `true` for gamma enhancements
 - `M8C_MIN_RECOMMENDATION_SCORE`: Lower to 65 for more recommendations
 

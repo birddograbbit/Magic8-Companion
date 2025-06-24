@@ -3,7 +3,7 @@ Unified configuration for Magic8-Companion recommendation engine.
 Consolidates config.py and config_simplified.py into one flexible system.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from typing import List, Union, Optional, Any, Dict
 from enum import Enum
 import json
@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Scoring thresholds - MADE MORE LENIENT
     min_recommendation_score: int = 60  # Down from 70
     min_score_gap: int = 10  # Down from 15
+
+    # === ML INTEGRATION SETTINGS ===
+    enable_ml_integration: bool = Field(False, env='M8C_ENABLE_ML_INTEGRATION')
+    ml_weight: float = Field(0.35, env='M8C_ML_WEIGHT')
+    ml_path: str = Field('../MLOptionTrading', env='M8C_ML_PATH')
     
     # === MARKET DATA SETTINGS ===
     
