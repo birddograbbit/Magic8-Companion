@@ -14,13 +14,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# If logging has not yet been configured by the application, set up a basic
-# configuration that respects the M8C_LOG_LEVEL environment variable. This
-# allows debugging output from this helper when used standalone.
-if not logging.getLogger().hasHandlers():
-    _level = os.getenv("M8C_LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(level=getattr(logging, _level, logging.INFO))
-
 class MLEnhancedScoring:
     """
     Drop-in replacement for Magic8-Companion scorer with ML enhancement
@@ -82,7 +75,7 @@ class MLEnhancedScoring:
             logger.error(f"Error loading ML system: {e}")
             logger.info("ML enhancement disabled. Using rule-based scoring only.")
     
-    async def score_combo_types(self, market_data: Dict, symbol: str) -> Dict[str, float]:
+    def score_combo_types(self, market_data: Dict, symbol: str) -> Dict[str, float]:
         """
         Enhanced scoring with ML integration
         
@@ -94,7 +87,7 @@ class MLEnhancedScoring:
             Dictionary of strategy scores
         """
         # Get base rule-based scores
-        base_scores = await self.base_scorer.score_combo_types(market_data, symbol)
+        base_scores = self.base_scorer.score_combo_types(market_data, symbol)
         
         # If ML system not loaded, return base scores
         if self.ml_system is None:
@@ -177,10 +170,6 @@ class MLEnhancedScoring:
                 'close': market_data['vix']
             }], index=[current_time])
             ml_data['vix_data'] = vix_data
-        logger.debug(f"ML data keys: {list(ml_data.keys())}")
-        for k, df in ml_data.items():
-            if isinstance(df, pd.DataFrame):
-                logger.debug(f"{k} shape: {df.shape}")
         
         return ml_data
     
@@ -272,8 +261,7 @@ if __name__ == "__main__":
     }
     
     # Get enhanced scores
-    import asyncio
-    scores = asyncio.run(enhanced_scorer.score_combo_types(market_data, 'SPX'))
+    scores = enhanced_scorer.score_combo_types(market_data, 'SPX')
     print(f"Enhanced scores: {scores}")
     
     # Adjust ML weight if needed
