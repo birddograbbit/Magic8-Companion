@@ -75,7 +75,7 @@ class MLEnhancedScoring:
             logger.error(f"Error loading ML system: {e}")
             logger.info("ML enhancement disabled. Using rule-based scoring only.")
     
-    def score_combo_types(self, market_data: Dict, symbol: str) -> Dict[str, float]:
+    async def score_combo_types(self, market_data: Dict, symbol: str) -> Dict[str, float]:
         """
         Enhanced scoring with ML integration
         
@@ -87,7 +87,7 @@ class MLEnhancedScoring:
             Dictionary of strategy scores
         """
         # Get base rule-based scores
-        base_scores = self.base_scorer.score_combo_types(market_data, symbol)
+        base_scores = await self.base_scorer.score_combo_types(market_data, symbol)
         
         # If ML system not loaded, return base scores
         if self.ml_system is None:
@@ -261,7 +261,8 @@ if __name__ == "__main__":
     }
     
     # Get enhanced scores
-    scores = enhanced_scorer.score_combo_types(market_data, 'SPX')
+    import asyncio
+    scores = asyncio.run(enhanced_scorer.score_combo_types(market_data, 'SPX'))
     print(f"Enhanced scores: {scores}")
     
     # Adjust ML weight if needed
