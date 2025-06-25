@@ -28,7 +28,8 @@ class MLEnhancedScoring:
             ml_option_trading_path: Path to MLOptionTrading repository
         """
         self.base_scorer = base_scorer
-        self.ml_path = Path(ml_option_trading_path)
+        # Convert to absolute path to ensure it works regardless of working directory
+        self.ml_path = Path(ml_option_trading_path).resolve()
         self.ml_system = None
         self.ml_weight = 0.35  # 35% ML, 65% rules
         
@@ -39,8 +40,9 @@ class MLEnhancedScoring:
         """Load ML system if available"""
         try:
             # Add ML path to Python path
-            if str(self.ml_path) not in sys.path:
-                sys.path.insert(0, str(self.ml_path))
+            ml_path_str = str(self.ml_path)
+            if ml_path_str not in sys.path:
+                sys.path.insert(0, ml_path_str)
             
             # Import ML components
             from ml.enhanced_ml_system import ProductionMLSystem, MLConfig
@@ -49,30 +51,51 @@ class MLEnhancedScoring:
             # Check if models exist
             models_dir = self.ml_path / "models"
             if not models_dir.exists():
-                logger.warning("ML models directory not found. Run training first.")
+                logger.warning(f"ML models directory not found at {models_dir}. Run training first.")
                 return
             
-            # Initialize ML system
+            # Construct absolute paths to model files
+            direction_model_path = (models_dir / "direction_model.pkl").resolve()
+            volatility_model_path = (models_dir / "volatility_model.pkl").resolve()
+            
+            # Verify model files exist
+            if not direction_model_path.exists():
+                logger.warning(f"Direction model not found at {direction_model_path}")
+                return
+            if not volatility_model_path.exists():
+                logger.warning(f"Volatility model not found at {volatility_model_path}")
+                return
+            
+            logger.info(f"Loading models from {models_dir}")
+            logger.info(f"Direction model: {direction_model_path}")
+            logger.info(f"Volatility model: {volatility_model_path}")
+            
+            # Initialize ML system with absolute paths
             config = MLConfig(
                 enable_two_stage=True,
                 use_vectorized_greeks=True,
                 confidence_threshold=0.65,
-                direction_model_path=str(models_dir / "direction_model.pkl"),
-                volatility_model_path=str(models_dir / "volatility_model.pkl")
+                direction_model_path=str(direction_model_path),
+                volatility_model_path=str(volatility_model_path)
             )
             
             self.ml_system = ProductionMLSystem(config)
-            self.data_loader = DiscordDataLoader(
-                str(self.ml_path / "temp_exports" / "processed_parquet")
-            )
+            
+            # Initialize data loader with absolute path
+            processed_parquet_path = (self.ml_path / "temp_exports" / "processed_parquet").resolve()
+            self.data_loader = DiscordDataLoader(str(processed_parquet_path))
             
             logger.info("ML system loaded successfully")
+            logger.info(f"ML path: {self.ml_path}")
+            logger.info(f"Models loaded from: {models_dir}")
             
         except ImportError as e:
             logger.warning(f"Could not import ML components: {e}")
             logger.info("ML enhancement disabled. Using rule-based scoring only.")
         except Exception as e:
             logger.error(f"Error loading ML system: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             logger.info("ML enhancement disabled. Using rule-based scoring only.")
     
     async def score_combo_types(self, market_data: Dict, symbol: str) -> Dict[str, float]:
@@ -122,6 +145,8 @@ class MLEnhancedScoring:
             
         except Exception as e:
             logger.error(f"Error in ML scoring: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Fall back to base scores
             return base_scores
     
