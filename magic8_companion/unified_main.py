@@ -303,6 +303,18 @@ async def main():
     
     try:
         await app.initialize()
+
+        ml_scheduler_thread = None
+        if settings.enable_ml_5min:
+            try:
+                from magic8_companion.ml_scheduler_extension import MLSchedulerExtension
+                ml_scheduler = MLSchedulerExtension()
+                ml_scheduler_thread = ml_scheduler.start_scheduler()
+                logger.info("Phase 2: ML 5-minute scheduler started")
+            except Exception as e:
+                logger.error(f"Failed to start ML scheduler: {e}")
+                logger.info("Continuing with checkpoint-only predictions")
+
         await app.run()
     except KeyboardInterrupt:
         logger.info("Shutdown requested via keyboard interrupt")

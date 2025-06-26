@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     enable_ml_integration: bool = Field(False, env='M8C_ENABLE_ML_INTEGRATION')
     ml_weight: float = Field(0.35, env='M8C_ML_WEIGHT')
     ml_path: str = Field('../MLOptionTrading', env='M8C_ML_PATH')
+    enable_ml_5min: bool = Field(False, env='M8C_ENABLE_ML_5MIN')
+    ml_5min_interval: int = Field(5, env='M8C_ML_5MIN_INTERVAL')
+    ml_5min_confidence_threshold: float = Field(0.65, env='M8C_ML_5MIN_CONFIDENCE_THRESHOLD')
+    ml_5min_merge_strategy: str = Field('overlay', env='M8C_ML_5MIN_MERGE_STRATEGY')
     
     # === MARKET DATA SETTINGS ===
     
