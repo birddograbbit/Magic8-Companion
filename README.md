@@ -20,6 +20,7 @@ A simplified trade type recommendation engine that analyzes market conditions an
 - **35% ML / 65% Rules**: Balanced approach combining ML with proven rules
 - **2.5 Years Training Data**: Based on profitable Discord trading history
 - See **[ML_INTEGRATION_GUIDE.md](docs/ML_INTEGRATION_GUIDE.md)** for setup
+- **Phase 2: 5-Minute Predictions**: Enable real-time ML by setting `M8C_ENABLE_ML_5MIN=true`
 
 ### Gamma Enhancement Integration
 - Integration with MLOptionTrading for gamma exposure analysis
