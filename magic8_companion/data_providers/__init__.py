@@ -6,6 +6,8 @@ Provides a unified interface for different data sources (IB, Yahoo, Polygon).
 from typing import Protocol, Dict, Any, Optional
 import logging
 import asyncio
+import pandas as pd
+from pathlib import Path
 from ..unified_config import settings
 from ..modules.ib_client_manager import IBClientManager
 
@@ -25,6 +27,10 @@ class DataProvider(Protocol):
 
     async def is_connected(self) -> bool:
         """Check if provider is connected and ready."""
+        ...
+
+    async def get_historical_data(self, symbol: str, interval: str, period: str) -> pd.DataFrame:
+        """Get historical OHLCV data."""
         ...
 
 
@@ -167,6 +173,61 @@ class IBDataProvider:
         except Exception:
             return False
 
+    async def get_historical_data(self, symbol: str, interval: str, period: str) -> pd.DataFrame:
+        """Fetch historical bars from IBKR or fallback provider."""
+        if not await self.is_connected():
+            if settings.ibkr_fallback_to_yahoo:
+                logger.info("IB not connected, falling back to Yahoo for bars")
+                return await YahooDataProvider().get_historical_data(symbol, interval, period)
+            raise ConnectionError("IB not connected")
+
+        try:
+            client = await self.manager.get_client()
+            await client._ensure_connected()
+            underlying = await client.qualify_underlying_with_fallback(symbol)
+            if not underlying:
+                raise ValueError("Unable to qualify underlying")
+
+            # Map interval/period to IB format
+            bar_size = interval.replace('m', ' mins').replace('d', ' day').replace('h', ' hour')
+            duration = period.replace('d', ' D').replace('w', ' W').replace('m', ' M').replace('y', ' Y')
+
+            bars = await client.ib.reqHistoricalDataAsync(
+                underlying,
+                endDateTime="",
+                durationStr=duration,
+                barSizeSetting=bar_size,
+                whatToShow="TRADES",
+                useRTH=False,
+                formatDate=1,
+                keepUpToDate=False,
+                chartOptions=[],
+                timeout=15,
+            )
+
+            records = [
+                {
+                    "datetime": b.date,
+                    "open": b.open,
+                    "high": b.high,
+                    "low": b.low,
+                    "close": b.close,
+                    "volume": b.volume,
+                }
+                for b in bars
+            ]
+            df = pd.DataFrame.from_records(records)
+            if not df.empty:
+                df["datetime"] = pd.to_datetime(df["datetime"])
+                df.set_index("datetime", inplace=True)
+            return df
+        except Exception as e:
+            logger.warning(f"IB historical data fetch failed: {e}")
+            if settings.ibkr_fallback_to_yahoo:
+                logger.info("Falling back to Yahoo for bars")
+                return await YahooDataProvider().get_historical_data(symbol, interval, period)
+            raise
+
 
 class YahooDataProvider:
     """Yahoo Finance data provider."""
@@ -176,17 +237,72 @@ class YahooDataProvider:
 
     async def get_option_chain(self, symbol: str) -> Dict[str, Any]:
         """Get option chain from Yahoo Finance."""
-        # Would use yfinance here
-        return {"symbol": symbol, "option_chain": []}
+        import yfinance as yf
+        ticker = yf.Ticker(self._map_symbol(symbol))
+        chain = await asyncio.to_thread(lambda: ticker.option_chain())
+        if not chain or chain.calls.empty:
+            return {"symbol": symbol, "option_chain": []}
+        calls = chain.calls
+        puts = chain.puts
+        option_chain = []
+        for _, row in calls.iterrows():
+            option_chain.append({
+                "strike": float(row["strike"]),
+                "call_oi": int(row.get("openInterest", 0) or 0),
+                "call_iv": float(row.get("impliedVolatility", 0) or 0),
+                "call_bid": float(row.get("bid", 0) or 0),
+                "call_ask": float(row.get("ask", 0) or 0),
+                "call_volume": int(row.get("volume", 0) or 0),
+            })
+        for _, row in puts.iterrows():
+            strike = float(row["strike"])
+            match = next((o for o in option_chain if o["strike"] == strike), None)
+            if match:
+                match.update({
+                    "put_oi": int(row.get("openInterest", 0) or 0),
+                    "put_iv": float(row.get("impliedVolatility", 0) or 0),
+                    "put_bid": float(row.get("bid", 0) or 0),
+                    "put_ask": float(row.get("ask", 0) or 0),
+                    "put_volume": int(row.get("volume", 0) or 0),
+                })
+            else:
+                option_chain.append({
+                    "strike": strike,
+                    "put_oi": int(row.get("openInterest", 0) or 0),
+                    "put_iv": float(row.get("impliedVolatility", 0) or 0),
+                    "put_bid": float(row.get("bid", 0) or 0),
+                    "put_ask": float(row.get("ask", 0) or 0),
+                    "put_volume": int(row.get("volume", 0) or 0),
+                })
+        option_chain.sort(key=lambda x: x["strike"])
+        price = await self.get_spot_price(symbol)
+        return {"symbol": symbol, "current_price": price, "option_chain": option_chain}
 
     async def get_spot_price(self, symbol: str) -> float:
         """Get spot price from Yahoo."""
-        # Would use yfinance
+        import yfinance as yf
+        ticker = yf.Ticker(self._map_symbol(symbol))
+        data = await asyncio.to_thread(lambda: ticker.history(period="1d", interval="1m"))
+        if isinstance(data, pd.DataFrame) and not data.empty:
+            return float(data["Close"].iloc[-1])
         return 0.0
 
     async def is_connected(self) -> bool:
         """Yahoo is always available."""
         return True
+
+    def _map_symbol(self, symbol: str) -> str:
+        mapping = {"SPX": "^GSPC", "VIX": "^VIX"}
+        return mapping.get(symbol, symbol)
+
+    async def get_historical_data(self, symbol: str, interval: str, period: str) -> pd.DataFrame:
+        """Fetch historical data from Yahoo Finance."""
+        import yfinance as yf
+        ticker = yf.Ticker(self._map_symbol(symbol))
+        data = await asyncio.to_thread(ticker.history, interval=interval, period=period)
+        if isinstance(data, pd.DataFrame):
+            return data
+        return pd.DataFrame()
 
 
 class FileDataProvider:
@@ -212,6 +328,20 @@ class FileDataProvider:
         """Get spot price from cache."""
         data = await self.get_option_chain(symbol)
         return data.get("current_price", 0.0)
+
+    async def get_historical_data(self, symbol: str, interval: str, period: str) -> pd.DataFrame:
+        """Load historical data from cached CSV/JSON if available."""
+        base = Path(self.cache_path).parent
+        csv_file = base / f"{symbol}_{interval}_{period}.csv"
+        json_file = base / f"{symbol}_{interval}_{period}.json"
+        if csv_file.exists():
+            return pd.read_csv(csv_file)
+        if json_file.exists():
+            import json
+            with open(json_file) as f:
+                data = json.load(f)
+            return pd.DataFrame(data)
+        return pd.DataFrame()
 
     async def is_connected(self) -> bool:
         """File provider is always ready."""

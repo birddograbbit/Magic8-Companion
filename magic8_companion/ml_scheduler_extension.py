@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict
 
 import pandas as pd
+import asyncio
 import pytz
 import schedule
 from threading import Thread
@@ -31,7 +32,6 @@ from ml.discord_data_processor import DiscordDataLoader
 # Import from Magic8-Companion
 from magic8_companion.data_providers import get_provider
 from magic8_companion.unified_config import settings
-import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
@@ -67,24 +67,6 @@ class MLSchedulerExtension:
 
         logger.info("ML Scheduler Extension initialized")
 
-    def _yf_symbol(self, symbol: str) -> str:
-        """Map symbols to yfinance tickers."""
-        mapping = {
-            'SPX': '^GSPC',
-            'VIX': '^VIX',
-        }
-        return mapping.get(symbol, symbol)
-
-    def _fetch_5min_bars(self, symbol: str) -> pd.DataFrame:
-        """Fetch recent 5 minute bars using yfinance."""
-        try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(interval="5m", period="1d")
-            if isinstance(data, pd.DataFrame):
-                return data
-        except Exception as e:
-            logger.warning(f"Failed to fetch bars for {symbol}: {e}")
-        return pd.DataFrame()
 
     def update_market_data(self):
         """Update market data cache"""
@@ -93,13 +75,17 @@ class MLSchedulerExtension:
             return
         try:
             for symbol in self.symbols:
-                bars = self._fetch_5min_bars(self._yf_symbol(symbol))
-                if not bars.empty:
+                bars = asyncio.run(
+                    self.data_provider.get_historical_data(symbol, "5m", "1d")
+                )
+                if isinstance(bars, pd.DataFrame) and not bars.empty:
                     self.bar_data_cache[symbol] = bars
                     logger.debug(f"Updated {len(bars)} bars for {symbol}")
 
-            vix_data = self._fetch_5min_bars(self._yf_symbol('VIX'))
-            if not vix_data.empty:
+            vix_data = asyncio.run(
+                self.data_provider.get_historical_data("VIX", "5m", "1d")
+            )
+            if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
                 self.vix_data_cache = vix_data
                 logger.debug(f"Updated {len(vix_data)} VIX bars")
             self.last_update = current_time
