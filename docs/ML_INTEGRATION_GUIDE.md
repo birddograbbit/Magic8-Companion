@@ -430,7 +430,7 @@ from ml.enhanced_ml_system import ProductionMLSystem, MLConfig
 from ml.discord_data_processor import DiscordDataLoader
 
 # Import from Magic8-Companion
-from magic8_companion.data_providers.factory import DataProviderFactory
+from magic8_companion.data_providers import get_provider
 from magic8_companion.utils.config import Config
 
 logger = logging.getLogger(__name__)
@@ -456,7 +456,7 @@ class MLSchedulerExtension:
         
         # Initialize data provider (reuse Magic8's connection)
         provider_type = self.config.get('M8C_DATA_PROVIDER', 'yahoo')
-        self.data_provider = DataProviderFactory.create(provider_type)
+        self.data_provider = get_provider(provider_type)
         
         # Configuration
         self.symbols = self.config.get('M8C_SYMBOLS', 'SPX,SPY').split(',')

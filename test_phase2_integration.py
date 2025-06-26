@@ -22,6 +22,7 @@ async def test_phase2():
         from magic8_companion.ml_scheduler_extension import MLSchedulerExtension
         scheduler = MLSchedulerExtension()
         print("\u2713 ML scheduler initialized")
+        print(f"Using provider: {scheduler.data_provider.__class__.__name__}")
     except Exception as e:
         print(f"\u2717 ML scheduler failed: {e}")
         return
