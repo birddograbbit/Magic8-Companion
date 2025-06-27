@@ -11,7 +11,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import pandas as pd
 import asyncio
@@ -30,7 +30,7 @@ from ml.enhanced_ml_system import ProductionMLSystem, MLConfig
 from ml.discord_data_processor import DiscordDataLoader
 
 # Import from Magic8-Companion
-from magic8_companion.data_providers import get_provider
+from magic8_companion.data_providers import DataProvider
 from magic8_companion.unified_config import settings
 from magic8_companion.modules.ib_client_manager import IBClientManager
 
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 class MLSchedulerExtension:
     """Extends Magic8-Companion with 5-minute ML predictions"""
 
-    def __init__(self, loop: asyncio.AbstractEventLoop | None = None):
+    def __init__(self, loop: asyncio.AbstractEventLoop | None = None, data_provider: Optional[DataProvider] = None):
         self.symbols = settings.supported_symbols
         self.output_dir = Path(settings.output_file_path).parent
         self.output_dir.mkdir(exist_ok=True)
@@ -54,8 +54,12 @@ class MLSchedulerExtension:
         )
         self.ml_system = ProductionMLSystem(self.ml_config)
 
-        # Data provider
-        self.data_provider = get_provider(settings.data_provider)
+        # Use the provided data provider or get the singleton
+        if data_provider is None:
+            from magic8_companion.data_providers import get_provider
+            self.data_provider = get_provider(settings.data_provider)
+        else:
+            self.data_provider = data_provider
 
         # Timezone helpers
         self.est = pytz.timezone('US/Eastern')
@@ -294,16 +298,9 @@ class MLSchedulerExtension:
         return self._thread
 
     def stop(self):
-        """Stop the scheduler and disconnect the IB client."""
+        """Stop the scheduler."""
         logger.info("Stopping ML Scheduler Extension")
         self._running = False
         schedule.clear()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
-        try:
-            future = asyncio.run_coroutine_threadsafe(
-                IBClientManager().disconnect(), self.loop
-            )
-            future.result(timeout=10)
-        except Exception as e:
-            logger.error(f"Error disconnecting IB client: {e}")
