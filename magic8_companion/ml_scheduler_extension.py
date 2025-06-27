@@ -213,10 +213,14 @@ class MLSchedulerExtension:
                     continue
                 delta_data = self.create_delta_features(symbol, bar_data)
                 trades_data = pd.DataFrame()
-                naive_time = current_time.replace(tzinfo=None)
+                
+                # CRITICAL FIX: Create a truly naive datetime
+                # Use utcnow() to get a naive UTC datetime
+                naive_time = datetime.utcnow()
                 logger.debug(
                     f"Predicting with naive timestamp {naive_time} tzinfo={naive_time.tzinfo}"
                 )
+                
                 result = self.ml_system.predict(
                     discord_delta=delta_data,
                     discord_trades=trades_data,
