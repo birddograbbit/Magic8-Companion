@@ -162,7 +162,10 @@ if __name__ == "__main__":
 ## VIX Data Retrieval Issues
 
 Occasionally the ML scheduler fails to fetch VIX bars from IBKR, resulting in
-errors like `Unknown contract: Stock(symbol='VIX')`. The scheduler now retries
-using Yahoo Finance when IBKR data is unavailable. If both sources fail, the
+errors like `Unknown contract: Stock(symbol='VIX')`. VIX (and SPX) must be
+requested as an **Index** contract on the CBOE exchange to qualify properly.
+Use `Index('SPX', 'CBOE', 'USD')` for SPX and `Index('VIX', 'CBOE', 'USD')` for
+VIX as shown in the sample downloader script. The scheduler now retries using
+Yahoo Finance when IBKR data is unavailable. If both sources fail, the
 prediction step is skipped until data becomes available. Check the logs for
 `VIX data fetch failed` messages when troubleshooting.
