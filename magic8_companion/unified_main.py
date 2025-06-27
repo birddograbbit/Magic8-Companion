@@ -21,6 +21,7 @@ from .unified_config import settings
 from .modules.market_analysis import MarketAnalyzer
 from .modules.unified_combo_scorer import create_scorer
 from .utils.scheduler import SimpleScheduler
+from .data_providers import get_provider, DataProvider
 
 # Setup logging
 def setup_logging():
@@ -45,9 +46,12 @@ logger = setup_logging()
 class RecommendationEngine:
     """Unified recommendation engine for trade type analysis."""
 
-    def __init__(self):
-        # Initialize with mode-appropriate components
-        self.market_analyzer = MarketAnalyzer()
+    def __init__(self, data_provider: DataProvider):
+        # Store the shared data provider
+        self.data_provider = data_provider
+        
+        # Initialize with mode-appropriate components - pass data provider
+        self.market_analyzer = MarketAnalyzer(data_provider=self.data_provider)
 
         # Check if ML integration is enabled
         if hasattr(settings, 'enable_ml_integration') and settings.enable_ml_integration:
@@ -60,7 +64,7 @@ class RecommendationEngine:
                 
                 from magic8_ml_integration import MLEnhancedScoring
 
-                base_scorer = create_scorer(settings.get_scorer_mode())
+                base_scorer = create_scorer(settings.get_scorer_mode(), data_provider=self.data_provider)
                 self.combo_scorer = MLEnhancedScoring(
                     base_scorer,
                     ml_option_trading_path=settings.ml_path
@@ -73,9 +77,9 @@ class RecommendationEngine:
             except Exception as e:
                 logger.warning(f"Failed to initialize ML integration: {e}")
                 logger.info("Falling back to rule-based scoring")
-                self.combo_scorer = create_scorer(settings.get_scorer_mode())
+                self.combo_scorer = create_scorer(settings.get_scorer_mode(), data_provider=self.data_provider)
         else:
-            self.combo_scorer = create_scorer(settings.get_scorer_mode())
+            self.combo_scorer = create_scorer(settings.get_scorer_mode(), data_provider=self.data_provider)
 
         self.output_file = Path(settings.output_file_path)
         self.supported_symbols = settings.supported_symbols
@@ -213,7 +217,9 @@ class UnifiedMagic8Companion:
     """Unified Magic8-Companion application that replaces both main.py and main_simplified.py."""
     
     def __init__(self):
-        self.recommendation_engine = RecommendationEngine()
+        # Create a single data provider instance to share across all components
+        self.data_provider = get_provider(settings.data_provider)
+        self.recommendation_engine = RecommendationEngine(self.data_provider)
         self.scheduler = SimpleScheduler(settings.timezone)
         self.shutdown_event = asyncio.Event()
         self.ml_scheduler = None
@@ -281,13 +287,21 @@ class UnifiedMagic8Companion:
     async def shutdown(self):
         """Graceful shutdown."""
         logger.info("Shutting down Magic8-Companion...")
-
+        
+        # Stop ML scheduler if running
         if self.ml_scheduler:
             self.ml_scheduler.stop()
-
+        
         if self.scheduler:
             await self.scheduler.stop()
-
+        
+        # Disconnect data provider if it has a disconnect method
+        if hasattr(self.data_provider, 'disconnect'):
+            try:
+                await self.data_provider.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting data provider: {e}")
+            
         logger.info("Shutdown complete")
     
     def handle_signal(self, signum, frame):
@@ -312,8 +326,13 @@ async def main():
         if settings.enable_ml_5min:
             try:
                 from magic8_companion.ml_scheduler_extension import MLSchedulerExtension
+                # Get the current event loop
                 loop = asyncio.get_running_loop()
-                app.ml_scheduler = MLSchedulerExtension(loop)
+                # Pass the shared data provider and event loop to ML scheduler
+                app.ml_scheduler = MLSchedulerExtension(
+                    loop=loop, 
+                    data_provider=app.data_provider
+                )
                 app.ml_scheduler_thread = app.ml_scheduler.start_scheduler()
                 logger.info("Phase 2: ML 5-minute scheduler started")
             except Exception as e:
