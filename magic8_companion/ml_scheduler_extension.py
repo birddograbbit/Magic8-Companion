@@ -101,14 +101,32 @@ class MLSchedulerExtension:
                     self.bar_data_cache[symbol] = bars
                     logger.debug(f"Updated {len(bars)} bars for {symbol}")
 
-            vix_future = asyncio.run_coroutine_threadsafe(
-                self.data_provider.get_historical_data("VIX", "5m", "1d"),
-                self.loop,
-            )
-            vix_data = vix_future.result()
-            if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
-                self.vix_data_cache = vix_data
-                logger.debug(f"Updated {len(vix_data)} VIX bars")
+            try:
+                vix_future = asyncio.run_coroutine_threadsafe(
+                    self.data_provider.get_historical_data("VIX", "5m", "1d"),
+                    self.loop,
+                )
+                vix_data = vix_future.result()
+                if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
+                    self.vix_data_cache = vix_data
+                    logger.debug(f"Updated {len(vix_data)} VIX bars")
+                else:
+                    raise ValueError("Empty VIX data")
+            except Exception as vix_err:
+                logger.warning(f"VIX data fetch failed: {vix_err}")
+                try:
+                    from magic8_companion.data_providers import YahooDataProvider
+                    yahoo = YahooDataProvider()
+                    vix_future = asyncio.run_coroutine_threadsafe(
+                        yahoo.get_historical_data("VIX", "5m", "1d"),
+                        self.loop,
+                    )
+                    vix_data = vix_future.result()
+                    if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
+                        self.vix_data_cache = vix_data
+                        logger.debug("Loaded VIX bars from Yahoo fallback")
+                except Exception as e2:
+                    logger.error(f"Failed to fetch VIX data from fallback: {e2}")
             self.last_update = current_time
         except Exception as e:
             logger.error(f"Error updating market data: {e}")
@@ -157,6 +175,9 @@ class MLSchedulerExtension:
         self.update_market_data()
         current_time = datetime.now(self.utc)
         current_time_et = current_time.astimezone(self.est)
+        if self.vix_data_cache is None or self.vix_data_cache.empty:
+            logger.warning("VIX data unavailable, skipping ML prediction")
+            return
 
         if current_time_et.weekday() >= 5:
             logger.debug("Market closed (weekend)")
@@ -178,18 +199,19 @@ class MLSchedulerExtension:
         for symbol in self.symbols:
             try:
                 bar_data = self.bar_data_cache.get(symbol, pd.DataFrame())
-                vix_data = self.vix_data_cache or pd.DataFrame()
+                vix_data = self.vix_data_cache if self.vix_data_cache is not None else pd.DataFrame()
                 if bar_data.empty:
                     logger.warning(f"No data available for {symbol}")
                     continue
                 delta_data = self.create_delta_features(symbol, bar_data)
                 trades_data = pd.DataFrame()
+                naive_time = current_time.replace(tzinfo=None)
                 result = self.ml_system.predict(
                     discord_delta=delta_data,
                     discord_trades=trades_data,
                     bar_data=bar_data,
                     vix_data=vix_data,
-                    current_time=current_time,
+                    current_time=naive_time,
                 )
                 strategy = result['strategy']
                 confidence = result['confidence']

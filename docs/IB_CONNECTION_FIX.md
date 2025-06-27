@@ -158,3 +158,11 @@ if __name__ == "__main__":
 - Next connection attempt will create a new instance
 - All components automatically share the connection
 - No changes needed to data providers or other components
+
+## VIX Data Retrieval Issues
+
+Occasionally the ML scheduler fails to fetch VIX bars from IBKR, resulting in
+errors like `Unknown contract: Stock(symbol='VIX')`. The scheduler now retries
+using Yahoo Finance when IBKR data is unavailable. If both sources fail, the
+prediction step is skipped until data becomes available. Check the logs for
+`VIX data fetch failed` messages when troubleshooting.

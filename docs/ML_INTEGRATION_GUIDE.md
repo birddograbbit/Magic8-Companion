@@ -993,6 +993,14 @@ jq '.timestamp' data/recommendations.json
 jq '.timestamp' data/ml_predictions_5min.json
 ```
 
+**Issue: `ValueError: Not naive datetime (tzinfo is already set)`**
+```text
+This occurs when the scheduler passes a timezone-aware `current_time` to the ML
+system. The Phase 2 scheduler now strips timezone information before calling the
+ML module. If you see this error, ensure you are running the latest version and
+that `current_time` is naive UTC.
+```
+
 ### Phase 2 Best Practices
 
 1. **Resource Management**:
