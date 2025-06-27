@@ -30,6 +30,7 @@ naive_time = datetime.utcnow()
 
 The `datetime.utcnow()` method returns a truly naive datetime in UTC, which is what the ML system expects.
 
+A runtime patch now adjusts the MLOptionTrading FeatureEngineer to handle both naive and aware datetimes. The patch is loaded automatically from `magic8_companion.patches.ml_timezone_patch`.
 ## Testing
 
 ### Running Tests Properly

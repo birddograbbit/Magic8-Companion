@@ -1000,6 +1000,7 @@ system. The Phase 2 scheduler now strips timezone information before calling the
 ML module. If you see this error, ensure you are running the latest version and
 that `current_time` is naive UTC.
 ```
+A runtime patch (`ml_timezone_patch`) now safeguards the ML library from this error.
 
 ### Phase 2 Best Practices
 
