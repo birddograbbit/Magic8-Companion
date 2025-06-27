@@ -270,9 +270,10 @@ class MLSchedulerExtension:
         """Start the 5-minute scheduler"""
         schedule.every(settings.ml_5min_interval).minutes.do(self.run_ml_prediction)
         logger.info("ML 5-minute scheduler started")
-        self.run_ml_prediction()
 
         def run_schedule():
+            # Run an initial prediction within the scheduler thread
+            self.run_ml_prediction()
             while True:
                 try:
                     schedule.run_pending()
