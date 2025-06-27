@@ -216,6 +216,8 @@ class UnifiedMagic8Companion:
         self.recommendation_engine = RecommendationEngine()
         self.scheduler = SimpleScheduler(settings.timezone)
         self.shutdown_event = asyncio.Event()
+        self.ml_scheduler = None
+        self.ml_scheduler_thread = None
         
     async def initialize(self):
         """Initialize the application."""
@@ -279,10 +281,13 @@ class UnifiedMagic8Companion:
     async def shutdown(self):
         """Graceful shutdown."""
         logger.info("Shutting down Magic8-Companion...")
-        
+
+        if self.ml_scheduler:
+            self.ml_scheduler.stop()
+
         if self.scheduler:
             await self.scheduler.stop()
-            
+
         logger.info("Shutdown complete")
     
     def handle_signal(self, signum, frame):
@@ -304,13 +309,12 @@ async def main():
     try:
         await app.initialize()
 
-        ml_scheduler_thread = None
         if settings.enable_ml_5min:
             try:
                 from magic8_companion.ml_scheduler_extension import MLSchedulerExtension
                 loop = asyncio.get_running_loop()
-                ml_scheduler = MLSchedulerExtension(loop)
-                ml_scheduler_thread = ml_scheduler.start_scheduler()
+                app.ml_scheduler = MLSchedulerExtension(loop)
+                app.ml_scheduler_thread = app.ml_scheduler.start_scheduler()
                 logger.info("Phase 2: ML 5-minute scheduler started")
             except Exception as e:
                 logger.error(f"Failed to start ML scheduler: {e}")

@@ -32,6 +32,7 @@ from ml.discord_data_processor import DiscordDataLoader
 # Import from Magic8-Companion
 from magic8_companion.data_providers import get_provider
 from magic8_companion.unified_config import settings
+from magic8_companion.modules.ib_client_manager import IBClientManager
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,10 @@ class MLSchedulerExtension:
 
         # Event loop for scheduling async tasks
         self.loop = loop or asyncio.get_event_loop()
+
+        # Scheduler control
+        self._running = False
+        self._thread: Thread | None = None
 
         logger.info("ML Scheduler Extension initialized")
 
@@ -275,13 +280,30 @@ class MLSchedulerExtension:
         def run_schedule():
             # Run an initial prediction within the scheduler thread
             self.run_ml_prediction()
-            while True:
+            while self._running:
                 try:
                     schedule.run_pending()
                     time.sleep(1)
                 except Exception as e:
                     logger.error(f"Scheduler error: {e}")
                     time.sleep(10)
-        scheduler_thread = Thread(target=run_schedule, daemon=True)
-        scheduler_thread.start()
-        return scheduler_thread
+
+        self._running = True
+        self._thread = Thread(target=run_schedule, daemon=True)
+        self._thread.start()
+        return self._thread
+
+    def stop(self):
+        """Stop the scheduler and disconnect the IB client."""
+        logger.info("Stopping ML Scheduler Extension")
+        self._running = False
+        schedule.clear()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                IBClientManager().disconnect(), self.loop
+            )
+            future.result(timeout=10)
+        except Exception as e:
+            logger.error(f"Error disconnecting IB client: {e}")
