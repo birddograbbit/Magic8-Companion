@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict
 
@@ -64,6 +64,10 @@ class MLSchedulerExtension:
         self.bar_data_cache: Dict[str, pd.DataFrame] = {}
         self.vix_data_cache: pd.DataFrame | None = None
         self.last_update: datetime | None = None
+        self.last_prediction_time: datetime | None = None
+        self.max_cache_age = timedelta(minutes=30)
+        self.cache_cleanup_interval = 10
+        self._prediction_count = 0
 
         logger.info("ML Scheduler Extension initialized")
 
@@ -108,8 +112,30 @@ class MLSchedulerExtension:
         delta_df['price_vs_predicted'] = (current_price - delta_df['Predicted']) / current_price
         return delta_df
 
+    def should_run_prediction(self) -> bool:
+        """Determine if a prediction should run based on timing rules."""
+        current_time = datetime.now(self.utc)
+        et_time = current_time.astimezone(self.est)
+
+        # Skip first and last 5 minutes of regular trading hours
+        if et_time.hour == 9 and et_time.minute < 35:
+            return False
+        if et_time.hour == 15 and et_time.minute >= 55:
+            return False
+
+        if self.last_prediction_time and (
+            current_time - self.last_prediction_time
+        ) < timedelta(minutes=settings.ml_5min_interval):
+            return False
+
+        return True
+
     def run_ml_prediction(self):
         """Run ML prediction for all symbols"""
+        if not self.should_run_prediction():
+            logger.debug("Skipping 5-minute prediction")
+            return
+
         logger.info("Running 5-minute ML prediction")
         self.update_market_data()
         current_time = datetime.now(self.utc)
@@ -187,6 +213,20 @@ class MLSchedulerExtension:
             json.dump(recommendations, f, indent=2)
         self._merge_with_recommendations(recommendations)
         logger.debug(f"5-min ML predictions saved to {ml_output}")
+        self.last_prediction_time = current_time
+        self._prediction_count += 1
+        if self._prediction_count >= self.cache_cleanup_interval:
+            self.cleanup_cache()
+            self._prediction_count = 0
+
+    def cleanup_cache(self):
+        """Remove stale market data from caches."""
+        cutoff = datetime.now(self.utc) - self.max_cache_age
+        for symbol in list(self.bar_data_cache.keys()):
+            df = self.bar_data_cache[symbol]
+            self.bar_data_cache[symbol] = df[df.index > cutoff]
+        if self.vix_data_cache is not None:
+            self.vix_data_cache = self.vix_data_cache[self.vix_data_cache.index > cutoff]
 
     def _merge_with_recommendations(self, ml_recommendations: Dict):
         """Merge 5-minute ML predictions with existing recommendations"""
