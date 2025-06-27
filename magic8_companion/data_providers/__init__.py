@@ -348,34 +348,50 @@ class FileDataProvider:
         return True
 
 
+# Singleton instances of data providers
+_ib_provider_instance: Optional[IBDataProvider] = None
+_yahoo_provider_instance: Optional[YahooDataProvider] = None
+_file_provider_instance: Optional[FileDataProvider] = None
+
+
 def get_provider(provider_name: Optional[str] = None) -> DataProvider:
     """
-    Get a data provider instance.
+    Get a singleton data provider instance.
 
     Args:
         provider_name: Name of provider (ib, yahoo, file).
                       If None, uses settings.data_provider
 
     Returns:
-        DataProvider instance
+        DataProvider instance (singleton)
     """
+    global _ib_provider_instance, _yahoo_provider_instance, _file_provider_instance
+    
     if provider_name is None:
         provider_name = settings.data_provider
 
     provider_name = provider_name.lower()
 
     if provider_name == "ib":
-        return IBDataProvider()
+        if _ib_provider_instance is None:
+            _ib_provider_instance = IBDataProvider()
+        return _ib_provider_instance
 
     elif provider_name == "yahoo":
-        return YahooDataProvider()
+        if _yahoo_provider_instance is None:
+            _yahoo_provider_instance = YahooDataProvider()
+        return _yahoo_provider_instance
 
     elif provider_name == "file":
-        return FileDataProvider()
+        if _file_provider_instance is None:
+            _file_provider_instance = FileDataProvider()
+        return _file_provider_instance
 
     else:
         logger.warning(f"Unknown provider {provider_name}, defaulting to file")
-        return FileDataProvider()
+        if _file_provider_instance is None:
+            _file_provider_instance = FileDataProvider()
+        return _file_provider_instance
 
 
 __all__ = [
