@@ -28,6 +28,8 @@ sys.path.insert(0, ML_PATH)
 # Import from MLOptionTrading
 from ml.enhanced_ml_system import ProductionMLSystem, MLConfig
 from ml.discord_data_processor import DiscordDataLoader
+from magic8_companion.patches.ml_timezone_patch import apply_patch as _apply_tz_patch
+_apply_tz_patch()
 
 # Import from Magic8-Companion
 from magic8_companion.data_providers import DataProvider
