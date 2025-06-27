@@ -20,6 +20,10 @@ DiscordTrading (Execution)
 Interactive Brokers
 ```
 
+> **Note**: Magic8-Companion now creates temporary IBClient instances using the
+> regular constructor. These clients automatically reuse the shared IB
+> connection provided by the `IBClientManager`.
+
 ## Key Components
 
 ### 1. MLOptionTrading
