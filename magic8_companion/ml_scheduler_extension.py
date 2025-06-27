@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -217,8 +217,8 @@ class MLSchedulerExtension:
                 trades_data = pd.DataFrame()
                 
                 # CRITICAL FIX: Create a truly naive datetime
-                # Use utcnow() to get a naive UTC datetime
-                naive_time = datetime.utcnow()
+                # Use the new Python 3.12+ recommended approach
+                naive_time = datetime.now(timezone.utc).replace(tzinfo=None)
                 logger.debug(
                     f"Predicting with naive timestamp {naive_time} tzinfo={naive_time.tzinfo}"
                 )
