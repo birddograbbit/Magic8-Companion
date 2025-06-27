@@ -101,19 +101,27 @@ class MLSchedulerExtension:
                     self.bar_data_cache[symbol] = bars
                     logger.debug(f"Updated {len(bars)} bars for {symbol}")
 
-            try:
-                vix_future = asyncio.run_coroutine_threadsafe(
-                    self.data_provider.get_historical_data("VIX", "5m", "1d"),
-                    self.loop,
-                )
-                vix_data = vix_future.result()
-                if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
-                    self.vix_data_cache = vix_data
-                    logger.debug(f"Updated {len(vix_data)} VIX bars")
-                else:
+            vix_data = None
+            for attempt in range(1, settings.vix_ib_retry_count + 1):
+                try:
+                    vix_future = asyncio.run_coroutine_threadsafe(
+                        self.data_provider.get_historical_data("VIX", "5m", "1d"),
+                        self.loop,
+                    )
+                    vix_data = vix_future.result()
+                    if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
+                        self.vix_data_cache = vix_data
+                        logger.debug(f"Updated {len(vix_data)} VIX bars")
+                        break
                     raise ValueError("Empty VIX data")
-            except Exception as vix_err:
-                logger.warning(f"VIX data fetch failed: {vix_err}")
+                except Exception as vix_err:
+                    logger.warning(
+                        f"VIX data fetch failed (attempt {attempt}): {vix_err}"
+                    )
+                    vix_data = None
+
+            if vix_data is None:
+                logger.info("Switching to Yahoo for VIX data")
                 try:
                     from magic8_companion.data_providers import YahooDataProvider
                     yahoo = YahooDataProvider()
@@ -206,6 +214,9 @@ class MLSchedulerExtension:
                 delta_data = self.create_delta_features(symbol, bar_data)
                 trades_data = pd.DataFrame()
                 naive_time = current_time.replace(tzinfo=None)
+                logger.debug(
+                    f"Predicting with naive timestamp {naive_time} tzinfo={naive_time.tzinfo}"
+                )
                 result = self.ml_system.predict(
                     discord_delta=delta_data,
                     discord_trades=trades_data,

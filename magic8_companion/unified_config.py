@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     ibkr_port: int = 7497
     ibkr_client_id: int = 1
     ibkr_fallback_to_yahoo: bool = True
+    vix_ib_retry_count: int = 1  # Number of retries before falling back
     
     # OI Streaming settings
     enable_oi_streaming: bool = True  # Enable/disable OI streaming
