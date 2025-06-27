@@ -21,7 +21,7 @@ from .unified_config import settings
 from .modules.market_analysis import MarketAnalyzer
 from .modules.unified_combo_scorer import create_scorer
 from .utils.scheduler import SimpleScheduler
-from .data_providers import get_provider, DataProvider
+from .data_providers import get_shared_provider, disconnect_all_providers, DataProvider
 
 # Setup logging
 def setup_logging():
@@ -67,7 +67,8 @@ class RecommendationEngine:
                 base_scorer = create_scorer(settings.get_scorer_mode(), data_provider=self.data_provider)
                 self.combo_scorer = MLEnhancedScoring(
                     base_scorer,
-                    ml_option_trading_path=settings.ml_path
+                    ml_option_trading_path=settings.ml_path,
+                    data_provider=self.data_provider
                 )
 
                 if hasattr(settings, 'ml_weight'):
@@ -217,9 +218,8 @@ class UnifiedMagic8Companion:
     """Unified Magic8-Companion application that replaces both main.py and main_simplified.py."""
     
     def __init__(self):
-        # Create a single data provider instance to share across all components
-        self.data_provider = get_provider(settings.data_provider)
-        self.recommendation_engine = RecommendationEngine(self.data_provider)
+        self.data_provider = None  # Will be initialized in async initialize()
+        self.recommendation_engine = None
         self.scheduler = SimpleScheduler(settings.timezone)
         self.shutdown_event = asyncio.Event()
         self.ml_scheduler = None
@@ -230,6 +230,13 @@ class UnifiedMagic8Companion:
         logger.info(f"Initializing Magic8-Companion ({settings.system_complexity} mode)...")
         logger.info(f"Output file: {settings.output_file_path}")
         logger.info(f"Supported symbols: {settings.supported_symbols}")
+        
+        # Create a single shared data provider instance
+        self.data_provider = await get_shared_provider(settings.data_provider)
+        logger.info(f"Using shared {settings.data_provider} data provider")
+        
+        # Initialize recommendation engine with shared provider
+        self.recommendation_engine = RecommendationEngine(self.data_provider)
         
         # Use mode-appropriate checkpoint times
         checkpoint_times = settings.effective_checkpoint_times
@@ -295,12 +302,12 @@ class UnifiedMagic8Companion:
         if self.scheduler:
             await self.scheduler.stop()
         
-        # Disconnect data provider if it has a disconnect method
-        if hasattr(self.data_provider, 'disconnect'):
-            try:
-                await self.data_provider.disconnect()
-            except Exception as e:
-                logger.error(f"Error disconnecting data provider: {e}")
+        # Disconnect all shared data providers
+        try:
+            await disconnect_all_providers()
+            logger.info("All data providers disconnected")
+        except Exception as e:
+            logger.error(f"Error disconnecting data providers: {e}")
             
         logger.info("Shutdown complete")
     
