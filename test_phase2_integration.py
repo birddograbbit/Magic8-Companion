@@ -20,7 +20,8 @@ async def test_phase2():
 
     try:
         from magic8_companion.ml_scheduler_extension import MLSchedulerExtension
-        scheduler = MLSchedulerExtension()
+        loop = asyncio.get_running_loop()
+        scheduler = MLSchedulerExtension(loop)
         print("\u2713 ML scheduler initialized")
         print(f"Using provider: {scheduler.data_provider.__class__.__name__}")
     except Exception as e:
