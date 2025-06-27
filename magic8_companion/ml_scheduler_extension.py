@@ -11,7 +11,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import pandas as pd
 import asyncio
@@ -30,9 +30,8 @@ from ml.enhanced_ml_system import ProductionMLSystem, MLConfig
 from ml.discord_data_processor import DiscordDataLoader
 
 # Import from Magic8-Companion
-from magic8_companion.data_providers import get_provider
+from magic8_companion.data_providers import DataProvider
 from magic8_companion.unified_config import settings
-from magic8_companion.modules.ib_client_manager import IBClientManager
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ logger = logging.getLogger(__name__)
 class MLSchedulerExtension:
     """Extends Magic8-Companion with 5-minute ML predictions"""
 
-    def __init__(self, loop: asyncio.AbstractEventLoop | None = None):
+    def __init__(self, loop: asyncio.AbstractEventLoop, data_provider: DataProvider):
         self.symbols = settings.supported_symbols
         self.output_dir = Path(settings.output_file_path).parent
         self.output_dir.mkdir(exist_ok=True)
@@ -54,8 +53,8 @@ class MLSchedulerExtension:
         )
         self.ml_system = ProductionMLSystem(self.ml_config)
 
-        # Data provider
-        self.data_provider = get_provider(settings.data_provider)
+        # Use the shared data provider instance
+        self.data_provider = data_provider
 
         # Timezone helpers
         self.est = pytz.timezone('US/Eastern')
@@ -71,13 +70,13 @@ class MLSchedulerExtension:
         self._prediction_count = 0
 
         # Event loop for scheduling async tasks
-        self.loop = loop or asyncio.get_event_loop()
+        self.loop = loop
 
         # Scheduler control
         self._running = False
         self._thread: Thread | None = None
 
-        logger.info("ML Scheduler Extension initialized")
+        logger.info("ML Scheduler Extension initialized with shared data provider")
 
 
     def update_market_data(self):
@@ -92,7 +91,7 @@ class MLSchedulerExtension:
                     self.data_provider.get_historical_data(symbol, "5m", "1d"),
                     self.loop,
                 )
-                bars = future.result()
+                bars = future.result(timeout=30)
                 if isinstance(bars, pd.DataFrame) and not bars.empty:
                     self.bar_data_cache[symbol] = bars
                     logger.debug(f"Updated {len(bars)} bars for {symbol}")
@@ -101,7 +100,7 @@ class MLSchedulerExtension:
                 self.data_provider.get_historical_data("VIX", "5m", "1d"),
                 self.loop,
             )
-            vix_data = vix_future.result()
+            vix_data = vix_future.result(timeout=30)
             if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
                 self.vix_data_cache = vix_data
                 logger.debug(f"Updated {len(vix_data)} VIX bars")
@@ -294,16 +293,9 @@ class MLSchedulerExtension:
         return self._thread
 
     def stop(self):
-        """Stop the scheduler and disconnect the IB client."""
+        """Stop the scheduler"""
         logger.info("Stopping ML Scheduler Extension")
         self._running = False
         schedule.clear()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
-        try:
-            future = asyncio.run_coroutine_threadsafe(
-                IBClientManager().disconnect(), self.loop
-            )
-            future.result(timeout=10)
-        except Exception as e:
-            logger.error(f"Error disconnecting IB client: {e}")
