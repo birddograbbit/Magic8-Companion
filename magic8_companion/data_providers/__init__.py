@@ -351,6 +351,9 @@ class FileDataProvider:
 def get_provider(provider_name: Optional[str] = None) -> DataProvider:
     """
     Get a data provider instance.
+    
+    WARNING: This creates a new instance each time! For shared instances,
+    use get_shared_provider() instead.
 
     Args:
         provider_name: Name of provider (ib, yahoo, file).
@@ -378,10 +381,21 @@ def get_provider(provider_name: Optional[str] = None) -> DataProvider:
         return FileDataProvider()
 
 
+# Import singleton functions from provider_manager
+from .provider_manager import (
+    get_shared_provider,
+    disconnect_all_providers,
+    DataProviderManager
+)
+
+
 __all__ = [
     "DataProvider",
     "get_provider",
+    "get_shared_provider",  # NEW: Use this for singleton instances
+    "disconnect_all_providers",  # NEW: Clean shutdown
     "IBDataProvider",
     "YahooDataProvider",
     "FileDataProvider",
+    "DataProviderManager",  # NEW: For advanced usage
 ]
