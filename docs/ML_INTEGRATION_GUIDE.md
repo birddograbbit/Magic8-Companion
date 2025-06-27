@@ -427,6 +427,8 @@ Magic8-Companion
     └── ML Scheduler Extension (Phase 2) 🆕
         ├── Every 5 minutes during market hours
         ├── Uses existing IB data connection
+        ├── Temporary IBClient instances now use the standard constructor,
+            automatically reusing the shared connection
         ├── Runs ML predictions continuously
         └── Merges with checkpoint recommendations
 ```
