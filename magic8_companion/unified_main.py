@@ -21,6 +21,7 @@ from .unified_config import settings
 from .modules.market_analysis import MarketAnalyzer
 from .modules.unified_combo_scorer import create_scorer
 from .utils.scheduler import SimpleScheduler
+from .data_providers import get_provider
 
 # Setup logging
 def setup_logging():
@@ -46,6 +47,9 @@ class RecommendationEngine:
     """Unified recommendation engine for trade type analysis."""
 
     def __init__(self):
+        # Initialize data provider first (singleton)
+        self.data_provider = get_provider(settings.market_data_provider)
+        
         # Initialize with mode-appropriate components
         self.market_analyzer = MarketAnalyzer()
 
@@ -313,7 +317,8 @@ async def main():
             try:
                 from magic8_companion.ml_scheduler_extension import MLSchedulerExtension
                 loop = asyncio.get_running_loop()
-                app.ml_scheduler = MLSchedulerExtension(loop)
+                # Pass the shared data provider to ML scheduler
+                app.ml_scheduler = MLSchedulerExtension(loop, data_provider=app.recommendation_engine.data_provider)
                 app.ml_scheduler_thread = app.ml_scheduler.start_scheduler()
                 logger.info("Phase 2: ML 5-minute scheduler started")
             except Exception as e:
