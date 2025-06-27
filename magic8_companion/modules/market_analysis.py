@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 from ..unified_config import settings
-from ..modules.ib_client_manager import IBClientManager
+from ..data_providers import DataProvider
 
 logger = logging.getLogger(__name__)
 
@@ -22,26 +22,16 @@ logger = logging.getLogger(__name__)
 class MarketAnalyzer:
     """Market analyzer supporting IB (primary) and Yahoo Finance (fallback)."""
     
-    def __init__(self):
+    def __init__(self, data_provider: Optional[DataProvider] = None):
         # FIX: Use effective_use_mock_data to respect complexity mode
         self.use_mock_data = settings.effective_use_mock_data
-        self.provider = settings.market_data_provider
-        self.ib_client_manager = None
+        self.data_provider = data_provider  # Use the shared data provider
         self.iv_history = {}  # Store historical IV for percentile calculation
         self.cache_dir = Path('data')
         
         # Log which data source we're using
-        logger.info(f"MarketAnalyzer initialized: use_mock_data={self.use_mock_data}, provider={self.provider}, complexity={settings.system_complexity}")
+        logger.info(f"MarketAnalyzer initialized: use_mock_data={self.use_mock_data}, provider={settings.market_data_provider}, complexity={settings.system_complexity}")
         
-        # Initialize IB client manager if configured and not using mock data
-        if self.provider == "ib" and not self.use_mock_data:
-            try:
-                self.ib_client_manager = IBClientManager()
-                logger.info("IB client manager initialized successfully")
-            except Exception as e:
-                logger.warning(f"Failed to initialize IB client manager: {e}")
-                self.ib_client_manager = None
-
         # Path to cache file
         self.cache_file = self.cache_dir / "market_data_cache.json"
         self.cache_max_age = 300  # seconds
@@ -146,60 +136,44 @@ class MarketAnalyzer:
         return market_data
     
     async def _get_live_market_data(self, symbol: str) -> Optional[Dict]:
-        """Get live market data, prioritizing IB then falling back to other providers."""
-        # Always try IB first if available
-        if self.ib_client_manager:
-            try:
-                return await self._get_ib_market_data(symbol)
-            except Exception as e:
-                logger.warning(f"IB data fetch failed for {symbol}: {e}")
-                logger.info("Falling back to alternative data provider")
-        
-        # Fallback logic
-        try:
-            if self.provider == "yahoo" or self.provider == "ib":
-                return await self._get_yahoo_market_data(symbol)
-            elif self.provider == "polygon":
-                logger.warning("Polygon data provider not implemented yet, using Yahoo")
-                return await self._get_yahoo_market_data(symbol)
-            else:
-                logger.error(f"Unknown market data provider: {self.provider}")
-                return None
-        except Exception as e:
-            logger.error(f"Error fetching live data for {symbol}: {e}")
+        """Get live market data using the shared data provider."""
+        if not self.data_provider:
+            logger.error("No data provider available")
             logger.info("Falling back to mock data")
             return self._get_mock_market_data(symbol)
-    
-    async def _get_ib_market_data(self, symbol: str) -> Dict:
-        """Get market data from Interactive Brokers."""
+        
         try:
-            # Get the singleton IB client
-            ib_client = await self.ib_client_manager.get_client()
-            if not ib_client:
-                raise ConnectionError("Failed to get IB client from manager")
+            # Get option chain from data provider
+            option_chain_result = await self.data_provider.get_option_chain(symbol)
             
-            # Ensure connection
-            await ib_client._ensure_connected()
+            if not option_chain_result or 'option_chain' not in option_chain_result:
+                raise ValueError(f"No option chain data available for {symbol}")
             
-            # Get ATM options data (includes IV) - but we need more strikes!
-            atm_options = await ib_client.get_atm_options([symbol], days_to_expiry=0)
-            
-            if not atm_options:
-                raise ValueError(f"No ATM options data available for {symbol}")
-            
-            # Extract data from ATM options
-            current_price = atm_options[0].get('underlying_price_at_fetch', 0)
+            current_price = option_chain_result.get('current_price', 0)
+            option_chain = option_chain_result.get('option_chain', [])
             
             # Calculate average IV from ATM options
-            call_ivs = [opt['implied_volatility'] for opt in atm_options 
-                       if opt['right'] == 'C' and opt['implied_volatility'] is not None]
-            put_ivs = [opt['implied_volatility'] for opt in atm_options 
-                      if opt['right'] == 'P' and opt['implied_volatility'] is not None]
+            call_ivs = []
+            put_ivs = []
+            
+            for opt in option_chain:
+                strike = opt['strike']
+                # ATM is within 1% of current price
+                if abs(strike - current_price) / current_price < 0.01:
+                    if opt.get('call_iv'):
+                        call_ivs.append(opt['call_iv'])
+                    if opt.get('put_iv'):
+                        put_ivs.append(opt['put_iv'])
+            
+            if not call_ivs and not put_ivs:
+                # Use all options if no ATM found
+                call_ivs = [opt['call_iv'] for opt in option_chain if opt.get('call_iv')]
+                put_ivs = [opt['put_iv'] for opt in option_chain if opt.get('put_iv')]
             
             if not call_ivs and not put_ivs:
                 raise ValueError(f"No IV data available for {symbol}")
             
-            # Average of ATM call and put IVs
+            # Average of call and put IVs (already in decimal form from provider)
             all_ivs = call_ivs + put_ivs
             iv = np.mean(all_ivs) * 100  # Convert to percentage
             
@@ -212,69 +186,8 @@ class MarketAnalyzer:
             # Calculate expected daily range
             expected_range_pct = iv / 100 / np.sqrt(252)  # Daily move
             
-            # Determine gamma environment based on ATM bid-ask spreads
-            atm_call = next((opt for opt in atm_options if opt['right'] == 'C' and 
-                            abs(opt['strike'] - current_price) / current_price < 0.01), None)
-            
-            if atm_call and atm_call['bid'] and atm_call['ask']:
-                spread_pct = (atm_call['ask'] - atm_call['bid']) / current_price
-                if spread_pct < 0.001:  # Tight spread
-                    gamma_env = "High gamma, liquid markets"
-                else:
-                    gamma_env = "Moderate gamma environment"
-            else:
-                gamma_env = self._determine_gamma_environment(iv_percentile, expected_range_pct)
-            
-            # Build comprehensive option chain data for MLOptionTrading
-            # Organize by strike to consolidate call/put data
-            strikes_data = {}
-            
-            for opt in atm_options:
-                strike = opt.get("strike", 0)
-                if strike not in strikes_data:
-                    strikes_data[strike] = {
-                        "strike": strike,
-                        "call_oi": 0,
-                        "put_oi": 0,
-                        "call_iv": 0.20,
-                        "put_iv": 0.20,
-                        "call_bid": 0.0,
-                        "call_ask": 0.0,
-                        "put_bid": 0.0,
-                        "put_ask": 0.0,
-                        "call_gamma": 0.0,
-                        "put_gamma": 0.0,
-                        "call_delta": 0.0,
-                        "put_delta": 0.0,
-                        "call_volume": 0,
-                        "put_volume": 0,
-                        "dte": 0  # 0DTE for MLOptionTrading
-                    }
-                
-                # Fill in the data based on option type
-                if opt.get("right") == "C":
-                    strikes_data[strike]["call_oi"] = opt.get("open_interest", 0) or 0
-                    strikes_data[strike]["call_iv"] = opt.get("implied_volatility", 0.20) or 0.20
-                    strikes_data[strike]["call_bid"] = opt.get("bid", 0.0) or 0.0
-                    strikes_data[strike]["call_ask"] = opt.get("ask", 0.0) or 0.0
-                    # Add Greeks if available from IBKR
-                    strikes_data[strike]["call_gamma"] = opt.get("gamma", 0.0) or 0.0
-                    strikes_data[strike]["call_delta"] = opt.get("delta", 0.0) if opt.get("delta") is not None else (0.5 if strike >= current_price else 0.3)
-                else:  # Put
-                    strikes_data[strike]["put_oi"] = opt.get("open_interest", 0) or 0
-                    strikes_data[strike]["put_iv"] = opt.get("implied_volatility", 0.20) or 0.20
-                    strikes_data[strike]["put_bid"] = opt.get("bid", 0.0) or 0.0
-                    strikes_data[strike]["put_ask"] = opt.get("ask", 0.0) or 0.0
-                    # Add Greeks if available from IBKR
-                    strikes_data[strike]["put_gamma"] = opt.get("gamma", 0.0) or 0.0
-                    strikes_data[strike]["put_delta"] = opt.get("delta", 0.0) if opt.get("delta") is not None else (-0.5 if strike <= current_price else -0.3)
-            
-            # Convert to list sorted by strike
-            option_chain_data = list(strikes_data.values())
-            option_chain_data.sort(key=lambda x: x["strike"])
-            
-            # Log what we're caching
-            logger.info(f"Caching {len(option_chain_data)} strikes for {symbol} option chain")
+            # Determine gamma environment
+            gamma_env = self._determine_gamma_environment(iv_percentile, expected_range_pct)
             
             market_data = {
                 "symbol": symbol,
@@ -283,20 +196,20 @@ class MarketAnalyzer:
                 "gamma_environment": gamma_env,
                 "current_price": round(current_price, 2),
                 "implied_vol": round(iv, 1),
-                "atm_options_count": len(atm_options),
                 "analysis_timestamp": datetime.now().isoformat(),
                 "is_mock_data": False,
-                "data_provider": "ib"
+                "data_provider": settings.market_data_provider
             }
             
             # Write to cache with option chain data
-            self._write_market_data_cache(symbol, market_data, option_chain_data)
+            self._write_market_data_cache(symbol, market_data, option_chain)
             
             return market_data
             
         except Exception as e:
-            logger.error(f"Error fetching IB data for {symbol}: {e}")
-            raise
+            logger.error(f"Error fetching live data for {symbol}: {e}")
+            logger.info("Falling back to mock data")
+            return self._get_mock_market_data(symbol)
     
     def _store_iv_history(self, symbol: str, iv: float):
         """Store IV value for historical percentile calculation."""
@@ -319,107 +232,6 @@ class MarketAnalyzer:
         # Calculate actual percentile
         history = list(self.iv_history[symbol])
         return (sum(1 for iv in history if iv <= current_iv) / len(history)) * 100
-    
-    async def _get_yahoo_market_data(self, symbol: str) -> Dict:
-        """Get market data from Yahoo Finance."""
-        # For index symbols, Yahoo uses ^ prefix
-        yahoo_symbol = f"^{symbol}" if symbol in ["SPX", "RUT"] else symbol
-        
-        try:
-            # Get ticker object
-            ticker = yf.Ticker(yahoo_symbol)
-
-            # Get current price and historical data
-            info = await asyncio.to_thread(lambda: ticker.info)
-            hist = await asyncio.to_thread(ticker.history, period="30d")
-            
-            # Calculate realized volatility (30-day)
-            returns = hist['Close'].pct_change().dropna()
-            realized_vol = returns.std() * np.sqrt(252) * 100  # Annualized
-            
-            # Get options chain for IV calculation
-            option_chain_data = []
-            try:
-                # Get nearest expiration
-                expirations = await asyncio.to_thread(lambda: ticker.options)
-                if expirations:
-                    nearest_exp = expirations[0]
-                    opt_chain = await asyncio.to_thread(ticker.option_chain, nearest_exp)
-                    
-                    # Calculate approximate IV from ATM options
-                    current_price = hist['Close'].iloc[-1]
-                    calls = opt_chain.calls
-                    puts = opt_chain.puts
-                    
-                    # Find ATM strike
-                    strikes = calls['strike'].values
-                    atm_strike = strikes[np.abs(strikes - current_price).argmin()]
-                    
-                    # Get ATM IV (average of call and put)
-                    atm_call_iv = calls[calls['strike'] == atm_strike]['impliedVolatility'].iloc[0]
-                    atm_put_iv = puts[puts['strike'] == atm_strike]['impliedVolatility'].iloc[0]
-                    iv = (atm_call_iv + atm_put_iv) / 2 * 100
-                    
-                    # Store and calculate IV percentile
-                    self._store_iv_history(symbol, iv)
-                    iv_percentile = self._calculate_iv_percentile(symbol, iv)
-                    
-                    # Prepare comprehensive option chain data for cache
-                    for _, call_row in calls.iterrows():
-                        put_row = puts[puts['strike'] == call_row['strike']]
-                        option_chain_data.append({
-                            "strike": call_row['strike'],
-                            "call_oi": int(call_row.get('openInterest', 0)),
-                            "put_oi": int(put_row['openInterest'].iloc[0]) if not put_row.empty else 0,
-                            "call_iv": call_row.get('impliedVolatility', 0.20),
-                            "put_iv": put_row['impliedVolatility'].iloc[0] if not put_row.empty else 0.20,
-                            "call_bid": call_row.get('bid', 0.0),
-                            "call_ask": call_row.get('ask', 0.0),
-                            "put_bid": put_row['bid'].iloc[0] if not put_row.empty else 0.0,
-                            "put_ask": put_row['ask'].iloc[0] if not put_row.empty else 0.0,
-                            "call_gamma": 0.01,  # Yahoo doesn't provide Greeks
-                            "put_gamma": 0.01,
-                            "call_delta": 0.5 if call_row['strike'] >= current_price else 0.3,
-                            "put_delta": -0.5 if call_row['strike'] <= current_price else -0.3,
-                            "call_volume": int(call_row.get('volume', 0)),
-                            "put_volume": int(put_row['volume'].iloc[0]) if not put_row.empty else 0,
-                            "dte": 0  # Approximate for 0DTE
-                        })
-                else:
-                    iv = realized_vol
-                    iv_percentile = 50  # Default to middle
-            except:
-                # Fallback if options data not available
-                iv = realized_vol
-                iv_percentile = 50
-            
-            # Calculate expected daily range
-            expected_range_pct = iv / 100 / np.sqrt(252)  # Daily move
-            
-            # Determine gamma environment
-            gamma_env = self._determine_gamma_environment(iv_percentile, expected_range_pct)
-            
-            market_data = {
-                "symbol": symbol,
-                "iv_percentile": round(iv_percentile, 1),
-                "expected_range_pct": round(expected_range_pct, 4),
-                "gamma_environment": gamma_env,
-                "current_price": round(current_price, 2),
-                "realized_vol": round(realized_vol, 1),
-                "implied_vol": round(iv, 1),
-                "analysis_timestamp": datetime.now().isoformat(),
-                "is_mock_data": False,
-                "data_provider": "yahoo"
-            }
-            
-            # Write to cache with option chain data
-            self._write_market_data_cache(symbol, market_data, option_chain_data)
-            
-            return market_data
-            
-        except Exception as e:
-            logger.error(f"Error fetching Yahoo data for {symbol}: {e}")
-            raise
     
     def _get_mock_market_data(self, symbol: str) -> Dict:
         """Generate mock market data for testing."""
