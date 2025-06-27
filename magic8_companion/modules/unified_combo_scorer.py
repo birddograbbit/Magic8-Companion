@@ -30,9 +30,10 @@ class UnifiedComboScorer:
     Made MORE GENEROUS to reduce overly conservative behavior.
     """
     
-    def __init__(self, complexity: ScorerComplexity = ScorerComplexity.STANDARD):
+    def __init__(self, complexity: ScorerComplexity = ScorerComplexity.STANDARD, data_provider=None):
         """Initialize unified scorer with specified complexity level."""
         self.complexity = complexity
+        self.data_provider = data_provider  # Store the shared data provider
         
         # Configure thresholds based on complexity mode
         if complexity == ScorerComplexity.SIMPLE:
@@ -111,7 +112,7 @@ class UnifiedComboScorer:
     
     def _initialize_enhancements(self):
         """Initialize enhanced indicators if enabled."""
-        from magic8_companion.config import settings
+        from magic8_companion.unified_config import settings
         
         self.enable_greeks = getattr(settings, 'enable_greeks', False)
         self.enable_advanced_gex = getattr(settings, 'enable_advanced_gex', False)
@@ -132,7 +133,7 @@ class UnifiedComboScorer:
             try:
                 # Try enhanced GEX wrapper first
                 from magic8_companion.wrappers.enhanced_gex_wrapper import EnhancedGEXWrapper
-                self.enhanced_gex_wrapper = EnhancedGEXWrapper()
+                self.enhanced_gex_wrapper = EnhancedGEXWrapper(data_provider=self.data_provider)
                 logger.info("Enhanced GEX wrapper initialized")
             except ImportError:
                 logger.warning("Enhanced GEX wrapper not available, trying standard GEX")
@@ -367,12 +368,13 @@ class UnifiedComboScorer:
 
 
 # Factory function for easy usage
-def create_scorer(mode: str = "standard") -> UnifiedComboScorer:
+def create_scorer(mode: str = "standard", data_provider=None) -> UnifiedComboScorer:
     """
     Factory function to create scorer with specified mode.
     
     Args:
         mode: "simple", "standard", or "enhanced"
+        data_provider: Optional shared data provider instance
     
     Returns:
         UnifiedComboScorer instance
@@ -383,7 +385,7 @@ def create_scorer(mode: str = "standard") -> UnifiedComboScorer:
         "enhanced": ScorerComplexity.ENHANCED
     }
     
-    return UnifiedComboScorer(complexity_map.get(mode, ScorerComplexity.STANDARD))
+    return UnifiedComboScorer(complexity_map.get(mode, ScorerComplexity.STANDARD), data_provider=data_provider)
 
 
 # Backward compatibility aliases for existing imports
@@ -395,7 +397,7 @@ class ComboScorer(UnifiedComboScorer):
 
 def generate_recommendation(scores: Dict[str, float]) -> Dict[str, str]:
     """Generate combo type recommendation based on score thresholds."""
-    from magic8_companion.config import settings
+    from magic8_companion.unified_config import settings
 
     if not scores:
         return {"recommendation": "NONE", "reason": "No scores provided"}
