@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class MLSchedulerExtension:
     """Extends Magic8-Companion with 5-minute ML predictions"""
 
-    def __init__(self):
+    def __init__(self, loop: asyncio.AbstractEventLoop | None = None):
         self.symbols = settings.supported_symbols
         self.output_dir = Path(settings.output_file_path).parent
         self.output_dir.mkdir(exist_ok=True)
@@ -69,6 +69,9 @@ class MLSchedulerExtension:
         self.cache_cleanup_interval = 10
         self._prediction_count = 0
 
+        # Event loop for scheduling async tasks
+        self.loop = loop or asyncio.get_event_loop()
+
         logger.info("ML Scheduler Extension initialized")
 
 
@@ -78,30 +81,28 @@ class MLSchedulerExtension:
         if self.last_update and (current_time - self.last_update).seconds < 60:
             return
         
-        # Create a new event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
         try:
             for symbol in self.symbols:
-                bars = loop.run_until_complete(
-                    self.data_provider.get_historical_data(symbol, "5m", "1d")
+                future = asyncio.run_coroutine_threadsafe(
+                    self.data_provider.get_historical_data(symbol, "5m", "1d"),
+                    self.loop,
                 )
+                bars = future.result()
                 if isinstance(bars, pd.DataFrame) and not bars.empty:
                     self.bar_data_cache[symbol] = bars
                     logger.debug(f"Updated {len(bars)} bars for {symbol}")
 
-            vix_data = loop.run_until_complete(
-                self.data_provider.get_historical_data("VIX", "5m", "1d")
+            vix_future = asyncio.run_coroutine_threadsafe(
+                self.data_provider.get_historical_data("VIX", "5m", "1d"),
+                self.loop,
             )
+            vix_data = vix_future.result()
             if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
                 self.vix_data_cache = vix_data
                 logger.debug(f"Updated {len(vix_data)} VIX bars")
             self.last_update = current_time
         except Exception as e:
             logger.error(f"Error updating market data: {e}")
-        finally:
-            loop.close()
 
     def create_delta_features(self, symbol: str, bar_data: pd.DataFrame) -> pd.DataFrame:
         """Create simplified delta features from bar data"""
