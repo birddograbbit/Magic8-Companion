@@ -7,67 +7,49 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Import the singleton connection manager
+from .ib_client_manager import get_ib_connection, disconnect_ib, is_ib_connected
+
 class IBClient:
     def __init__(self, host: str = settings.ib_host, port: int = settings.ib_port, client_id: int = settings.ib_client_id):
-        self.ib = IB()
+        # Don't create our own IB instance - use the singleton
         self.host = host
         self.port = port
         self.client_id = client_id
-        self.is_connecting = False
-        self.connection_lock = asyncio.Lock()
         self.oi_fetcher = None  # Will be initialized after connection
 
     async def _ensure_connected(self):
-        async with self.connection_lock:
-            if not self.ib.isConnected() and not self.is_connecting:
-                self.is_connecting = True
-                print(f"Connecting to IB: {self.host}:{self.port} with ClientID: {self.client_id}")
-                try:
-                    await self.ib.connectAsync(self.host, self.port, clientId=self.client_id, timeout=10)
-                    print("Successfully connected to IB.")
-                    # Initialize OI fetcher after successful connection
-                    if settings.enable_oi_streaming:
-                        self.oi_fetcher = IBOpenInterestFetcher(self.ib)
-                        logger.info("OI streaming enabled")
-                    else:
-                        logger.info("OI streaming disabled by configuration")
-                except asyncio.TimeoutError:
-                    print(
-                        f"Timeout connecting to IB on {self.host}:{self.port}. "
-                        "Please ensure TWS/Gateway is running and API connections are enabled."
-                    )
-                except ConnectionRefusedError:
-                    print(
-                        f"Connection refused by IB on {self.host}:{self.port}. "
-                        "Check TWS/Gateway API settings."
-                    )
-                except Exception as e:
-                    print(f"Error connecting to IB: {e}")
-                finally:
-                    if not self.ib.isConnected():
-                        try:
-                            self.ib.disconnect()
-                        except Exception:
-                            pass
-                    self.is_connecting = False
-
-            # If connection attempt failed, it will still be not connected here.
-            if not self.ib.isConnected():
-                # Raise an exception if we couldn't connect, so calling functions know.
-                raise ConnectionError("Failed to connect to IB or not currently connected.")
+        """Ensure we have a connection from the singleton."""
+        ib = await get_ib_connection()
+        if not ib:
+            raise ConnectionError("Failed to connect to IB or not currently connected.")
+        
+        # Initialize OI fetcher after successful connection if needed
+        if settings.enable_oi_streaming and not self.oi_fetcher:
+            self.oi_fetcher = IBOpenInterestFetcher(ib)
+            logger.info("OI streaming enabled")
+            
+        return ib
+    
+    @property
+    def ib(self):
+        """Property to get the IB instance (for backward compatibility)."""
+        # This is a bit of a hack but maintains compatibility
+        # In async context, use _ensure_connected() instead
+        from .ib_client_manager import _ib_connection
+        return _ib_connection._ib
 
     async def disconnect(self):
-        if self.ib.isConnected():
-            print("Disconnecting from IB.")
-            self.ib.disconnect()
-            self.oi_fetcher = None
+        """Disconnect from IB using singleton."""
+        await disconnect_ib()
+        self.oi_fetcher = None
 
     async def get_positions(self) -> List[Dict]:
         """Return list of open option positions"""
-        await self._ensure_connected()
+        ib = await self._ensure_connected()
         positions_data = []
 
-        ib_positions: List[Position] = self.ib.positions()
+        ib_positions: List[Position] = ib.positions()
 
         for pos in ib_positions:
             contract: Contract = pos.contract
@@ -92,6 +74,8 @@ class IBClient:
 
     async def qualify_underlying_with_fallback(self, symbol_name: str) -> Optional[Contract]:
         """Try multiple symbol variations and exchanges to qualify underlying contract."""
+        ib = await self._ensure_connected()
+        
         # Symbol variations to try (e.g., SPX -> SPXW for 0DTE)
         symbol_variations = {
             'SPX': ['SPX', 'SPXW'],
@@ -123,7 +107,7 @@ class IBClient:
                         underlying_contract = Stock(sym_variant, exchange, 'USD')
                     
                     # Try to qualify
-                    qualified = await self.ib.qualifyContractsAsync(underlying_contract)
+                    qualified = await ib.qualifyContractsAsync(underlying_contract)
                     if qualified and qualified[0].conId:
                         logger.info(f"Qualified {symbol_name} as {sym_variant} on {exchange}")
                         return qualified[0]
@@ -137,6 +121,8 @@ class IBClient:
 
     async def qualify_option_with_fallback(self, symbol_name: str, expiry_date: str, strike: float, right: str, trading_class: str = None) -> Optional[Contract]:
         """Try multiple symbols and exchanges to qualify option contract."""
+        ib = await self._ensure_connected()
+        
         # For SPX, try both SPX and SPXW symbols
         symbol_variations = {
             'SPX': ['SPXW', 'SPX'],  # Prefer SPXW for 0DTE
@@ -178,7 +164,7 @@ class IBClient:
                         opt_contract.tradingClass = 'SPXW'
                     
                     # Try to qualify
-                    qualified = await self.ib.qualifyContractsAsync(opt_contract)
+                    qualified = await ib.qualifyContractsAsync(opt_contract)
                     if qualified and qualified[0].conId:
                         if sym_variant != symbol_name or exchange != 'CBOE':
                             logger.info(f"Qualified {symbol_name} option as {sym_variant} {strike} {right} on {exchange}")
@@ -197,7 +183,7 @@ class IBClient:
         Enhanced with symbol/exchange fallback logic for better contract qualification.
         Now includes OI data fetched via streaming.
         """
-        await self._ensure_connected()
+        ib = await self._ensure_connected()
         options_data = []
 
         if not symbols:
@@ -216,7 +202,7 @@ class IBClient:
                 continue
 
             # Get spot price
-            tickers: List[Ticker] = await self.ib.reqTickersAsync(underlying_contract)
+            tickers: List[Ticker] = await ib.reqTickersAsync(underlying_contract)
             await asyncio.sleep(0.1)
 
             spot_price = None
@@ -260,7 +246,7 @@ class IBClient:
                 continue
 
             # Request market data for qualified options
-            tickers_for_options: List[Ticker] = await self.ib.reqTickersAsync(*qualified_options)
+            tickers_for_options: List[Ticker] = await ib.reqTickersAsync(*qualified_options)
 
             # Store options data and contracts for OI fetching
             symbol_options_data = []
