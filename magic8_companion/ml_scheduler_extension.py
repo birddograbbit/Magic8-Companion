@@ -77,16 +77,21 @@ class MLSchedulerExtension:
         current_time = datetime.now(self.utc)
         if self.last_update and (current_time - self.last_update).seconds < 60:
             return
+        
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         try:
             for symbol in self.symbols:
-                bars = asyncio.run(
+                bars = loop.run_until_complete(
                     self.data_provider.get_historical_data(symbol, "5m", "1d")
                 )
                 if isinstance(bars, pd.DataFrame) and not bars.empty:
                     self.bar_data_cache[symbol] = bars
                     logger.debug(f"Updated {len(bars)} bars for {symbol}")
 
-            vix_data = asyncio.run(
+            vix_data = loop.run_until_complete(
                 self.data_provider.get_historical_data("VIX", "5m", "1d")
             )
             if isinstance(vix_data, pd.DataFrame) and not vix_data.empty:
@@ -95,6 +100,8 @@ class MLSchedulerExtension:
             self.last_update = current_time
         except Exception as e:
             logger.error(f"Error updating market data: {e}")
+        finally:
+            loop.close()
 
     def create_delta_features(self, symbol: str, bar_data: pd.DataFrame) -> pd.DataFrame:
         """Create simplified delta features from bar data"""
