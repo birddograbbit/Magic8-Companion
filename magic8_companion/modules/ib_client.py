@@ -32,12 +32,23 @@ class IBClient:
                     else:
                         logger.info("OI streaming disabled by configuration")
                 except asyncio.TimeoutError:
-                    print(f"Timeout connecting to IB on {self.host}:{self.port}. Please ensure TWS/Gateway is running and API connections are enabled.")
+                    print(
+                        f"Timeout connecting to IB on {self.host}:{self.port}. "
+                        "Please ensure TWS/Gateway is running and API connections are enabled."
+                    )
                 except ConnectionRefusedError:
-                     print(f"Connection refused by IB on {self.host}:{self.port}. Check TWS/Gateway API settings.")
+                    print(
+                        f"Connection refused by IB on {self.host}:{self.port}. "
+                        "Check TWS/Gateway API settings."
+                    )
                 except Exception as e:
                     print(f"Error connecting to IB: {e}")
                 finally:
+                    if not self.ib.isConnected():
+                        try:
+                            self.ib.disconnect()
+                        except Exception:
+                            pass
                     self.is_connecting = False
 
             # If connection attempt failed, it will still be not connected here.
@@ -49,6 +60,7 @@ class IBClient:
         if self.ib.isConnected():
             print("Disconnecting from IB.")
             self.ib.disconnect()
+            self.oi_fetcher = None
 
     async def get_positions(self) -> List[Dict]:
         """Return list of open option positions"""
