@@ -198,30 +198,26 @@ class IBClientWrapper:
     async def get_positions(self):
         from .ib_client import IBClient
         await self._ensure_connected()
-        # Create temporary client with singleton connection
-        temp_client = IBClient.__new__(IBClient)
-        temp_client.ib = await get_ib_connection()
+        # Create temporary client using regular construction
+        temp_client = IBClient()
         temp_client.oi_fetcher = self.oi_fetcher
         return await temp_client.get_positions()
     
     async def qualify_underlying_with_fallback(self, symbol_name: str):
         from .ib_client import IBClient
         await self._ensure_connected()
-        temp_client = IBClient.__new__(IBClient)
-        temp_client.ib = await get_ib_connection()
+        temp_client = IBClient()
         return await temp_client.qualify_underlying_with_fallback(symbol_name)
     
     async def qualify_option_with_fallback(self, symbol_name: str, expiry_date: str, strike: float, right: str, trading_class: str = None):
         from .ib_client import IBClient
         await self._ensure_connected()
-        temp_client = IBClient.__new__(IBClient)
-        temp_client.ib = await get_ib_connection()
+        temp_client = IBClient()
         return await temp_client.qualify_option_with_fallback(symbol_name, expiry_date, strike, right, trading_class)
     
     async def get_atm_options(self, symbols, days_to_expiry=0):
         from .ib_client import IBClient
         await self._ensure_connected()
-        temp_client = IBClient.__new__(IBClient)
-        temp_client.ib = await get_ib_connection()
+        temp_client = IBClient()
         temp_client.oi_fetcher = self.oi_fetcher
         return await temp_client.get_atm_options(symbols, days_to_expiry)
