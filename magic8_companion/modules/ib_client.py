@@ -82,17 +82,19 @@ class IBClient:
             'RUT': ['RUT'],
             'SPY': ['SPY'],
             'QQQ': ['QQQ'],
-            'IWM': ['IWM']
+            'IWM': ['IWM'],
+            'VIX': ['VIX']
         }.get(symbol_name, [symbol_name])
         
         # Exchange preferences
         exchange_map = {
-            'SPX': ['SMART', 'CBOE'],
-            'SPXW': ['SMART', 'CBOE'],
+            'SPX': ['CBOE', 'SMART'],
+            'SPXW': ['CBOE', 'SMART'],
             'RUT': ['SMART', 'CBOE', 'RUSSELL'],
             'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS'],
             'QQQ': ['SMART', 'NASDAQ', 'CBOE'],
-            'IWM': ['SMART', 'ARCA', 'CBOE']
+            'IWM': ['SMART', 'ARCA', 'CBOE'],
+            'VIX': ['CBOE', 'SMART']
         }
         
         for sym_variant in symbol_variations:
@@ -101,7 +103,7 @@ class IBClient:
             for exchange in exchanges:
                 try:
                     # Create appropriate contract type
-                    if symbol_name in ['SPX', 'RUT']:
+                    if symbol_name in ['SPX', 'RUT', 'VIX']:
                         underlying_contract = Index(sym_variant, exchange, 'USD')
                     else:
                         underlying_contract = Stock(sym_variant, exchange, 'USD')

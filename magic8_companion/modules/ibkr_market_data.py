@@ -61,17 +61,19 @@ class IBKRMarketData:
             'QQQ': ['QQQ'],             # NASDAQ 100 ETF
             'IWM': ['IWM'],             # Russell 2000 ETF
             'SPY': ['SPY'],             # S&P 500 ETF
-            'RUT': ['RUT']              # Russell 2000 Index
+            'RUT': ['RUT'],             # Russell 2000 Index
+            'VIX': ['VIX']              # Volatility Index
         }
         
         # Exchange mapping - prioritize SMART for better fills
         self.exchange_map = {
-            'SPX': ['SMART', 'CBOE'],
-            'SPXW': ['SMART', 'CBOE'],
+            'SPX': ['CBOE', 'SMART'],
+            'SPXW': ['CBOE', 'SMART'],
             'RUT': ['SMART', 'CBOE', 'RUSSELL'],
             'QQQ': ['SMART', 'NASDAQ', 'CBOE'],
             'IWM': ['SMART', 'ARCA', 'CBOE'],
-            'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS']
+            'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS'],
+            'VIX': ['CBOE', 'SMART']
         }
         
         # Trading class preferences for 0DTE
@@ -118,7 +120,7 @@ class IBKRMarketData:
             for exchange in exchanges:
                 try:
                     # Create appropriate contract
-                    if symbol in ['SPX', 'RUT']:
+                    if symbol in ['SPX', 'RUT', 'VIX']:
                         # Index options
                         underlying = Index(
                             symbol=sym_variant,
