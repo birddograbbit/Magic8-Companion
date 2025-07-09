@@ -83,8 +83,7 @@ class IBClient:
             'SPY': ['SPY'],
             'QQQ': ['QQQ'],
             'IWM': ['IWM'],
-            'VIX': ['VIX'],
-            'NDX': ['NDX']  # Added NDX
+            'VIX': ['VIX']
         }.get(symbol_name, [symbol_name])
         
         # Exchange preferences
@@ -95,8 +94,7 @@ class IBClient:
             'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS'],
             'QQQ': ['SMART', 'NASDAQ', 'CBOE'],
             'IWM': ['SMART', 'ARCA', 'CBOE'],
-            'VIX': ['CBOE', 'SMART'],
-            'NDX': ['NASDAQ', 'SMART']  # Added NDX with NASDAQ as primary exchange
+            'VIX': ['CBOE', 'SMART']
         }
         
         for sym_variant in symbol_variations:
@@ -105,7 +103,7 @@ class IBClient:
             for exchange in exchanges:
                 try:
                     # Create appropriate contract type
-                    if symbol_name in ['SPX', 'RUT', 'VIX', 'NDX']:  # Added NDX to Index list
+                    if symbol_name in ['SPX', 'RUT', 'VIX']:
                         underlying_contract = Index(sym_variant, exchange, 'USD')
                     else:
                         underlying_contract = Stock(sym_variant, exchange, 'USD')
@@ -133,8 +131,7 @@ class IBClient:
             'RUT': ['RUT'],
             'SPY': ['SPY'],
             'QQQ': ['QQQ'],
-            'IWM': ['IWM'],
-            'NDX': ['NDX']  # Added NDX
+            'IWM': ['IWM']
         }.get(symbol_name, [symbol_name])
         
         # Exchange preferences - prioritize SMART
@@ -144,8 +141,7 @@ class IBClient:
             'RUT': ['SMART', 'CBOE', 'RUSSELL'],
             'SPY': ['SMART', 'CBOE', 'ARCA', 'BATS', 'AMEX', 'ISE'],
             'QQQ': ['SMART', 'NASDAQ', 'CBOE', 'ARCA'],
-            'IWM': ['SMART', 'ARCA', 'CBOE'],
-            'NDX': ['SMART', 'NASDAQ']  # Added NDX with SMART prioritized for options
+            'IWM': ['SMART', 'ARCA', 'CBOE']
         }
         
         for sym_variant in symbol_variations:
@@ -222,7 +218,7 @@ class IBClient:
                 spot_price = 5000
 
             # Determine ATM strikes
-            if symbol_name in ['SPX', 'SPXW', 'NDX']:  # Added NDX to use 5-point strikes
+            if symbol_name in ['SPX', 'SPXW']:
                 atm_strike = round(spot_price / 5) * 5  # Round to nearest 5
             elif symbol_name == 'SPY':
                 atm_strike = round(spot_price)  # Round to nearest 1
@@ -230,7 +226,7 @@ class IBClient:
                 atm_strike = round(spot_price / 5) * 5  # Default to 5
 
             # Get a wider range of strikes around ATM for better gamma calculations
-            strike_increment = 5 if symbol_name in ['SPX', 'SPXW', 'RUT', 'NDX'] else 1  # Added NDX to 5-point increment list
+            strike_increment = 5 if symbol_name in ['SPX', 'SPXW', 'RUT'] else 1
             num_strikes_each_side = 20
             strikes_to_check = [atm_strike + i * strike_increment
                                 for i in range(-num_strikes_each_side, num_strikes_each_side + 1)]
