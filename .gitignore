@@ -56,3 +56,4 @@ htmlcov/
 archive/
 test_*.json
 *_test.json
+data/market_data_cache.json

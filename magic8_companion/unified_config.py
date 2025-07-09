@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     
     # Core recommendation settings
     output_file_path: str = "data/recommendations.json"
-    supported_symbols: Union[str, List[str]] = ["SPX"] # ["SPX", "SPY", "QQQ", "RUT"]
+    supported_symbols: Union[str, List[str]] = ["SPX", "NDX"] # ["SPX", "SPY", "QQQ", "RUT"]
     checkpoint_times: Union[str, List[str]] = ["10:00", "10:10", "10:20", "10:30", "10:40", "10:50", "11:00", "11:10", "11:20", "11:30", "11:40", "11:50", "12:00", "12:10", "12:20", "12:30", "12:40", "12:50", "13:00", "13:10", "13:20", "13:30", "13:40", "13:50", "14:00", "14:10", "14:20", "14:30", "14:40", "14:50"]
     
     # Scoring thresholds - MADE MORE LENIENT

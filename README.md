@@ -141,6 +141,8 @@ The system outputs recommendations to `data/recommendations.json`:
   }
 }
 ```
+##RUN:
+python -m magic8_companion.unified_main
 
 ## Integration Points
 
